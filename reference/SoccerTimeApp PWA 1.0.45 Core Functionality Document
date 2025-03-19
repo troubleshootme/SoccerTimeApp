@@ -1,0 +1,189 @@
+# SoccerTimeApp PWA 1.0.45 Core Functionality Document
+
+## Overview
+SoccerTimeApp PWA 1.0.45 is a Progressive Web App (PWA) designed to track and manage player playing time during soccer matches. It allows coaches or team managers to monitor how long each player is on the field, ensuring fair playtime distribution. The app operates entirely on the client side for timekeeping, with session data persisted via HTTP requests to a PHP backend. It supports offline functionality, installability, and responsive design for both desktop and mobile devices.
+
+### Key Features
+1. **Session Management**: Users can start or resume sessions using a password, with session data (players, timers, settings) saved to the server.
+2. **Player Time Tracking**: Tracks individual player playtime, toggling players on/off the field, with automatic time updates.
+3. **Match Timer**: Manages a global match timer, supporting periods (halves or quarters) with configurable duration and segments.
+4. **Pause/Resume**: Allows pausing and resuming the match, preserving player states.
+5. **Settings Customization**: Configurable match duration, segments, target play duration, theme, and sound options.
+6. **Session Export/Backup/Restore**: Export player times to CSV, backup sessions to JSON, and restore from backups.
+7. **Responsive UI**: Adapts to mobile and desktop screens with a dark/light theme toggle.
+8. **PWA Features**: Installable as a standalone app, with offline support via service worker caching.
+
+## Core Functionality
+
+### 1. Session Management
+- **Purpose**: Allows users to create or resume a session to track a specific match or training session.
+- **Implementation**:
+  - **Start/Resume Session**:
+    - Users enter a session password in the `#session-password` input field.
+    - Clicking the `#start-session` button triggers `startOrResumeSession()`.
+    - The app checks if the session exists (`checkSessionExists`) via an HTTP POST to `session_handler.php` with `action: 'check'`.
+    - If the session doesn’t exist, a new session is initialized with default values (e.g., `matchTime = 0`, empty `players`).
+    - If the session exists, it’s loaded (`loadPlayers`) with saved data (players, timers, settings).
+    - The session password is stored in a cookie (`sessionPassword`) for 30 days.
+  - **Exit Session**:
+    - Clicking the `#exit` button triggers `exitSession()`.
+    - Saves the current session data, clears the UI, and returns to the session prompt.
+  - **Persistence**:
+    - Session data is saved to the server (`savePlayers`) via HTTP POST to `session_handler.php` with `action: 'save'`.
+    - Data is stored in JSON files in the `sessions/` directory, named `<password>.json`.
+    - The PHP backend (`session_handler.php`) handles `save`, `load`, and `check` actions, with automatic cleanup of sessions older than 60 days.
+
+### 2. Player Time Tracking
+- **Purpose**: Tracks how long each player is on the field, ensuring accurate playtime distribution.
+- **Implementation**:
+  - **Add Player**:
+    - Users click `#toggle-add` to show the `#add-player-form`, enter a name in `#player-name`, and click `#add-player` or press Enter to trigger `addPlayer()`.
+    - Adds a player to the `players` object (up to `MAX_PLAYERS = 50`), with initial state `{ time: 0, totalTime: 0, active: false, startTime: 0 }`.
+    - Creates a button in `#players-list` via `createPlayerButton()`.
+  - **Toggle Player**:
+    - Clicking a `.player-btn` triggers `togglePlayer(name)`.
+    - If inactive (`active: false`):
+      - Sets `active: true`, records `startTime` as `Date.now()`, and adds the `active` class to the button.
+      - If no players were active, starts the match timer (`matchRunning = true`, `matchStartTime = now`).
+    - If active (`active: true`):
+      - Sets `active: false`, calculates elapsed time since `startTime`, adds it to `totalTime`, and removes the `active` class.
+      - If no players remain active, stops the match timer (`matchRunning = false`).
+  - **Time Updates**:
+    - `updateTimes()` runs via `requestAnimationFrame` when `matchRunning` is true.
+    - For each active player, calculates elapsed time since `startTime` and updates `time`.
+    - Updates the match timer (`matchTime`) if any player is active.
+    - Ensures `matchTime` is at least the maximum player time (`maxPlayerTime`).
+  - **Reset/Remove**:
+    - Right-clicking a player button shows a context menu (`#context-menu`) with options to `resetPlayerTime()` or `removePlayer()`.
+    - Reset sets `time`, `totalTime`, and `startTime` to 0, and `active` to `false`.
+    - Remove deletes the player from `players` and updates the UI.
+
+### 3. Match Timer
+- **Purpose**: Tracks the overall match duration, with support for periods (halves or quarters).
+- **Implementation**:
+  - **Timer Loop**:
+    - `updateTimes()` runs continuously via `requestAnimationFrame` when `matchRunning` is true.
+    - Updates `matchTime` based on elapsed time since `matchStartTime`.
+    - Stops if `matchRunning` becomes `false` (e.g., no active players, match complete).
+  - **Periods**:
+    - Configurable via `matchSegments` (2 for halves, 4 for quarters) and `matchDuration`.
+    - Each period’s duration is `matchDuration / matchSegments`.
+    - When `matchTime` reaches a period’s end (`periodEndTime`), `showPeriodEndOverlay()` is triggered, pausing the timer and showing a prompt to start the next period.
+    - Clicking `#next-period-btn` (`startNextPeriod()`) advances `currentPeriod`, reactivates players, and resumes the timer.
+    - If `currentPeriod > matchSegments`, the match ends (`Match Complete`).
+  - **Pause/Resume**:
+    - Clicking `#pause-all` triggers `pauseAll()`.
+    - Pauses the timer, deactivates all players, and shows `#pause-overlay`.
+    - Resuming reactivates players and restarts the timer.
+  - **Display**:
+    - `updateMatchDisplay()` updates `#match-value` with the formatted `matchTime` (e.g., `mm:ss`).
+    - Shows period status in `#match-period` (e.g., `H1` for first half).
+    - Updates `#match-progress` bar based on `matchTime / matchDuration`.
+
+### 4. Settings Customization
+- **Purpose**: Allows users to configure match settings, appearance, and sound.
+- **Implementation**:
+  - **Access**: Clicking `#settings-btn` shows `#settings-modal` via `showSettings()`.
+  - **Options**:
+    - **Match Duration**: Toggle via `#enable-match-duration`, set minutes in `#match-duration-input` (default: 90 minutes).
+    - **Match Segments**: Select `#match-segments-select` (2 or 4).
+    - **Target Play Duration**: Toggle via `#enable-target-duration`, set minutes in `#target-duration-input` (default: 16 minutes).
+    - **Theme**: Select `#theme-select` (dark/light), saved in a cookie.
+    - **Sound**: Toggle `#enable-sound` for whistle sound on period end.
+  - **Updates**:
+    - Changes trigger `updateMatchDuration()`, `updateMatchSegments()`, `updateTargetDuration()`, `changeTheme()`, or `toggleSound()`, updating the respective variables and saving the session.
+
+### 5. Session Export/Backup/Restore
+- **Purpose**: Allows users to export, back up, and restore session data.
+- **Implementation**:
+  - **Export to CSV**:
+    - Clicking `#export-csv` triggers `exportSession()`.
+    - Generates a CSV file (`<sessionPassword>_times.csv`) with player names and total times.
+  - **Backup to JSON**:
+    - Clicking `#backup-session` triggers `backupSession()`.
+    - Saves the entire session state (players, timers, settings) as a JSON file (`<sessionPassword>_backup.json`).
+  - **Restore from JSON**:
+    - Clicking `#restore-session` opens a file input (`#restore-session-input`) to select a JSON file.
+    - `restoreSession(event)` validates the file (must be JSON, <1MB, correct structure) and overwrites the current session data.
+
+### 6. Responsive UI
+- **Purpose**: Ensures usability on both desktop and mobile devices.
+- **Implementation**:
+  - **Themes**: Supports dark/light themes, toggled via `#theme-select`, with CSS variables for colors.
+  - **Responsive Design**:
+    - Uses `clamp()` for font sizes to scale with viewport width.
+    - Media query (`@media (max-width: 480px)`) adjusts modal padding, input widths, and layout for mobile.
+  - **Overlays and Modals**:
+    - `#update-overlay`, `#pause-overlay`, and `#period-end-overlay` use CSS transitions for visibility.
+    - `#settings-modal` and `#match-log-modal` are centered with scrollable content on mobile.
+
+### 7. PWA Features
+- **Purpose**: Enhances user experience with offline support and installability.
+- **Implementation**:
+  - **Install Prompt**:
+    - Listens for `beforeinstallprompt` event to show an install option via `triggerInstall()`.
+  - **Service Worker**:
+    - `service-worker.js` caches key assets (`/`, `index.html`, `script.js`, etc.) for offline use.
+    - Handles updates by reloading the app when a new service worker is installed.
+  - **Manifest**:
+    - `manifest.json` (assumed present) defines the app’s name, icons, and display mode (`standalone`).
+
+## Technical Details
+
+### Client-Side (JavaScript: `script.js`)
+- **State Management**: Uses global variables (`players`, `matchTime`, etc.) for state, persisted via HTTP.
+- **Timekeeping**:
+  - `updateTimes()` uses `requestAnimationFrame` for smooth timer updates.
+  - Calculates elapsed time using `Date.now()` for accuracy.
+- **HTTP Requests**:
+  - Uses `fetch` to communicate with `session_handler.php` for session persistence.
+  - Saves every 500ms during active play (via `saveTimeout`).
+- **UI Updates**:
+  - Dynamically updates DOM elements (`#players-list`, `#match-value`, `#time-table-body`) based on state changes.
+  - Uses CSS classes (e.g., `active`, `visible`) for styling.
+
+### Server-Side (PHP: `session_handler.php`)
+- **Session Storage**:
+  - Stores session data as JSON files in `sessions/<password>.json`.
+  - Handles `save`, `load`, and `check` actions via HTTP POST.
+- **Cleanup**:
+  - Deletes session files older than 60 days on each request.
+
+### Styling (CSS: `styles.css`)
+- **Themes**: Dark/light themes with CSS variables.
+- **Responsive Design**: Mobile-friendly with media queries.
+- **Visual Feedback**: Gradients, shadows, and transitions for buttons and overlays.
+
+### PWA Features
+- **Service Worker**: Caches assets for offline use.
+- **Manifest**: Enables standalone app installation.
+
+## User Flow
+1. **Start Session**:
+   - Enter a password and click “Start Session” or “Resume Session”.
+   - Session loads or initializes, showing the main UI.
+2. **Add Players**:
+   - Click “Add Player”, enter a name, and add up to 50 players.
+3. **Track Time**:
+   - Toggle players on/off to start/stop their timers.
+   - Match timer runs automatically when any player is active.
+4. **Manage Match**:
+   - Pause/resume the match as needed.
+   - Advance through periods when prompted.
+5. **Customize Settings**:
+   - Adjust match duration, segments, target play duration, theme, and sound.
+6. **Export/Backup**:
+   - Export times to CSV or back up the session to JSON.
+   - Restore a session from a JSON backup.
+7. **Exit Session**:
+   - Save and exit, returning to the session prompt.
+
+## Known Limitations
+- **No Multi-Device Sync**: PWA 1.0.45 operates on a single device; changes on one device don’t sync to others.
+- **Client-Side Timekeeping**: Relies on the client’s clock, which may drift across devices.
+- **Basic Offline Support**: Caches assets but doesn’t handle session persistence offline.
+
+## Future Enhancements
+- **Multi-Device Synchronization**: Add real-time state syncing across devices (e.g., via polling or WebSocket).
+- **Improved Offline Support**: Persist session data locally when offline and sync when online.
+- **Enhanced Timekeeping**: Use a server-side time source (e.g., NTP) to reduce clock drift.
