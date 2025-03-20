@@ -6,6 +6,7 @@ import '../models/match_log_entry.dart';
 import '../services/session_service.dart';
 import '../services/audio_service.dart';
 import '../utils/format_time.dart';
+import '../database.dart';
 
 class AppState with ChangeNotifier {
   Session _session = Session();
@@ -16,6 +17,8 @@ class AppState with ChangeNotifier {
   Timer? _saveDebounceTimer;
   final SessionService _sessionService = SessionService();
   final AudioService _audioService = AudioService();
+  int? _currentSessionId;
+  List<Map<String, dynamic>> _players = [];
 
   AppState() {
     _loadTheme();
@@ -26,6 +29,8 @@ class AppState with ChangeNotifier {
   Session get session => _session;
   String? get currentSessionPassword => _currentSessionPassword;
   bool get isDarkTheme => _isDarkTheme;
+  int? get currentSessionId => _currentSessionId;
+  List<Map<String, dynamic>> get players => _players;
 
   // Setter for session
   set session(Session newSession) {
@@ -569,6 +574,36 @@ class AppState with ChangeNotifier {
       ));
     }
     await saveSession();
+    notifyListeners();
+  }
+
+  Future<void> loadSession(int sessionId) async {
+    _currentSessionId = sessionId;
+    _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
+    _players.sort((a, b) => a['name'].compareTo(b['name']));
+    notifyListeners();
+  }
+
+  Future<void> createSession(String name) async {
+    _currentSessionId = await SessionDatabase.instance.insertSession(name);
+    _players = [];
+    notifyListeners();
+  }
+
+  Future<void> addPlayer(String name) async {
+    if (_currentSessionId != null) {
+      await SessionDatabase.instance.insertPlayer(_currentSessionId!, name, 0);
+      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
+      _players.sort((a, b) => a['name'].compareTo(b['name']));
+    }
+    notifyListeners();
+  }
+
+  Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
+    if (_currentSessionId != null) {
+      await SessionDatabase.instance.updatePlayerTimer(playerId, timerSeconds);
+      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
+    }
     notifyListeners();
   }
 

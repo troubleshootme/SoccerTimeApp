@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'screens/session_prompt_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'providers/app_state.dart';
+import 'screens/main_screen.dart';
 
 void main() {
   runApp(
@@ -35,6 +36,9 @@ class SoccerTimeApp extends StatelessWidget {
             fontFamily: 'Verdana',
           ),
           home: SessionPromptScreen(),
+          routes: {
+            '/main': (context) => MainScreen(),
+          },
         );
       },
     );

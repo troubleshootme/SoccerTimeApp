@@ -1,13 +1,24 @@
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
   static Database? _database;
 
-  SessionDatabase._init();
+  SessionDatabase._init() {
+    if (!kIsWeb) {
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+      }
+    }
+  }
 
   Future<Database> get database async {
+    if (kIsWeb) throw UnsupportedError('SQLite not supported on web; use mobile');
     if (_database != null) return _database!;
     _database = await _initDB('sessions.db');
     return _database!;

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import '../providers/app_state.dart';
 import 'main_screen.dart';
+import '../session_dialog.dart';
 
 class SessionPromptScreen extends StatefulWidget {
   @override
@@ -20,6 +21,9 @@ class _SessionPromptScreenState extends State<SessionPromptScreen> {
     super.initState();
     _loadMotd();
     _checkSavedSession();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showSessionDialog(context);
+    });
   }
 
   Future<void> _checkSavedSession() async {
@@ -85,81 +89,21 @@ class _SessionPromptScreenState extends State<SessionPromptScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 5,
-                    offset: Offset(0, 5),
-                  ),
-                ],
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.grey[800]
-                    : Colors.grey[200],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _passwordController,
-                          decoration: InputDecoration(
-                            labelText: 'Session Password',
-                            border: OutlineInputBorder(),
-                          ),
-                          onChanged: (value) => _updateButtonLabel(),
-                          onSubmitted: (value) => _startOrResumeSession(),
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      ElevatedButton(
-                        onPressed: _startOrResumeSession,
-                        child: Text(_buttonText),
-                        style: ElevatedButton.styleFrom(
-                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 12),
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.black54
-                          : Colors.black12,
-                    ),
-                    child: MarkdownBody(data: _motd),
-                  ),
-                  SizedBox(height: 12),
-                  Text('Powered by:'),
-                  SizedBox(height: 12),
-                  Image.asset(
-                    'assets/bcs-grad-logo.png', // Add this asset to your project
-                    height: 50,
-                  ),
-                  SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () {
-                      // Open documentation URL
-                    },
-                    child: Text('Documentation'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      appBar: AppBar(title: const Text('SoccerTimeApp')),
+      body: Container(),
+    );
+  }
+
+  void _showSessionDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => SessionDialog(
+        onSessionSelected: (sessionId) async {
+          final appState = Provider.of<AppState>(context, listen: false);
+          await appState.loadSession(sessionId);
+          Navigator.pushReplacementNamed(context, '/main');
+        },
       ),
     );
   }
