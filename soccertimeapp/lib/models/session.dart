@@ -1,5 +1,5 @@
-import 'player.dart';
-import 'match_log_entry.dart';
+import '../models/player.dart';
+import '../models/match_log_entry.dart';
 
 class Session {
   Map<String, Player> players;
@@ -20,10 +20,10 @@ class Session {
   List<MatchLogEntry> matchLog;
 
   Session({
-    Map<String, Player> players = const {},
-    List<String> currentOrder = const [],
+    Map<String, Player>? players,
+    List<String>? currentOrder,
     this.isPaused = false,
-    List<String> activeBeforePause = const [],
+    List<String>? activeBeforePause,
     this.targetPlayDuration = 16 * 60,
     this.enableTargetDuration = false,
     this.matchTime = 0,
@@ -35,11 +35,11 @@ class Session {
     this.currentPeriod = 1,
     this.hasWhistlePlayed = false,
     this.enableSound = false,
-    List<MatchLogEntry> matchLog = const [],
-  })  : players = players,
-        currentOrder = currentOrder,
-        activeBeforePause = activeBeforePause,
-        matchLog = matchLog;
+    List<MatchLogEntry>? matchLog,
+  }) : players = players ?? <String, Player>{},
+       currentOrder = currentOrder ?? <String>[],
+       activeBeforePause = activeBeforePause ?? <String>[],
+       matchLog = matchLog ?? <MatchLogEntry>[];
 
   Map<String, dynamic> toJson() => {
         'players': players.map((name, player) => MapEntry(name, player.toJson())),

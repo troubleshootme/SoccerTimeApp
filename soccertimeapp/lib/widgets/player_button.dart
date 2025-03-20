@@ -5,6 +5,7 @@ import '../utils/format_time.dart';
 import '../models/player.dart';
 import '../models/session.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:math' as math;
 
 class PlayerButton extends StatelessWidget {
   final String name;
@@ -63,19 +64,19 @@ class PlayerButton extends StatelessWidget {
       },
       child: Container(
         margin: EdgeInsets.only(bottom: kIsWeb ? 6 : 12),
-        padding: EdgeInsets.all(24),
+        padding: EdgeInsets.all(8), // Smaller padding to fit progress bar
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(25),
           gradient: LinearGradient(
             colors: player.active
-                ? [Colors.green, Colors.greenAccent]
-                : [Colors.red, Color.fromRGBO(255, 102, 102, 1)],
+                ? [Colors.green.shade800, Colors.green]
+                : [Colors.red.shade800, Colors.red],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
           border: Border.all(
             color: isGoalReached
-                ? (Theme.of(context).brightness == Brightness.dark
-                    ? Colors.yellow
-                    : Colors.orange)
+                ? Colors.yellow
                 : Colors.white,
             width: 2,
           ),
@@ -89,71 +90,89 @@ class PlayerButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Stack(
+        child: Column(
           children: [
-            if (enableTargetDuration)
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(
-                    widthFactor: progress / 100,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.white.withOpacity(0.2),
-                            Colors.white.withOpacity(0.2),
-                            Colors.transparent,
-                            Colors.transparent,
-                          ],
-                          stops: [0.0, 0.2, 0.2, 0.4],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          tileMode: TileMode.repeated,
-                          transform: GradientRotation(45 * 3.14159 / 180),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: kIsWeb ? 20 : 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black45,
-                        blurRadius: 2,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.black54
-                        : Colors.black12,
-                  ),
-                  child: Text(
-                    formatTime(time),
+            // Player content
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    name,
                     style: TextStyle(
-                      fontSize: kIsWeb ? 20 : 26,
+                      fontSize: kIsWeb ? 20 : 24,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
                   ),
-                ),
-              ],
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black45,
+                          blurRadius: 2,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                      color: Colors.black45,
+                    ),
+                    child: Text(
+                      formatTime(time),
+                      style: TextStyle(
+                        fontSize: kIsWeb ? 20 : 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
+            
+            // Progress bar
+            if (enableTargetDuration)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Container(
+                  height: 10,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.black38,
+                  ),
+                  child: Row(
+                    children: [
+                      AnimatedContainer(
+                        duration: Duration(milliseconds: 300),
+                        curve: Curves.easeOut,
+                        width: (progress / 100) * (MediaQuery.of(context).size.width - 70), // Adjust based on screen width
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          gradient: LinearGradient(
+                            colors: isGoalReached 
+                                ? [Colors.yellow.shade600, Colors.amber]
+                                : [Colors.lightBlue.shade300, Colors.blue],
+                            begin: Alignment.centerLeft, 
+                            end: Alignment.centerRight,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isGoalReached 
+                                ? Colors.yellow.withOpacity(0.6)
+                                : Colors.blue.withOpacity(0.4),
+                              blurRadius: 3,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -167,4 +186,45 @@ class PlayerButton extends StatelessWidget {
         session.matchTime >= periodEndTime &&
         session.currentPeriod <= session.matchSegments;
   }
+}
+
+class DiagonalStripesPainter extends CustomPainter {
+  final double stripeWidth;
+  final Color stripeColor;
+  final double stripeSpacing;
+
+  DiagonalStripesPainter({
+    required this.stripeWidth,
+    required this.stripeColor,
+    required this.stripeSpacing,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = stripeColor
+      ..style = PaintingStyle.fill;
+
+    double totalWidth = size.width + size.height;
+    int numStripes = (totalWidth / (stripeWidth + stripeSpacing)).ceil() + 2;
+    
+    for (int i = -2; i < numStripes; i++) {
+      double startX = -size.height + i * (stripeWidth + stripeSpacing);
+      
+      final path = Path()
+        ..moveTo(startX, 0)
+        ..lineTo(startX + stripeWidth, 0)
+        ..lineTo(startX + stripeWidth + size.height, size.height)
+        ..lineTo(startX + size.height, size.height)
+        ..close();
+      
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DiagonalStripesPainter oldDelegate) => 
+      oldDelegate.stripeWidth != stripeWidth ||
+      oldDelegate.stripeColor != stripeColor ||
+      oldDelegate.stripeSpacing != stripeSpacing;
 }

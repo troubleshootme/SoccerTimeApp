@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/session.dart';
+import '../models/player.dart';
+import '../models/match_log_entry.dart';
 
 class SessionService {
   static const String _baseUrl = 'http://localhost:8000/session_handler.php'; // Use relative path for local server
@@ -46,19 +48,116 @@ class SessionService {
 
   Future<Session> loadSession(String password) async {
     try {
+      // Create a default session to use if anything goes wrong - MOVED TO TOP OF METHOD
+      var defaultSession = Session(
+        matchDuration: 90 * 60,
+        enableMatchDuration: true,
+        matchSegments: 2,
+        currentPeriod: 1,
+        players: <String, Player>{},
+        matchLog: <MatchLogEntry>[],
+      );
+      
       var response = await http.post(
         Uri.parse(_baseUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'action': 'load', 'password': password}),
       );
+      
       if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        return Session.fromJson(data);
+        print('Load session response: ${response.body}');
+        var rawData = jsonDecode(response.body);
+        
+        // Check if response is an array instead of an object
+        if (rawData is List) {
+          print('Warning: Received array instead of object, returning default session');
+          return defaultSession;
+        }
+        
+        // Now we know rawData is a Map
+        if (rawData is Map<String, dynamic>) {
+          // Create a corrected copy of the raw data
+          var correctedData = Map<String, dynamic>.from(rawData);
+          
+          // Fix players property if it's an array instead of a map
+          if (correctedData.containsKey('players') && correctedData['players'] is List) {
+            print('Warning: players property is not a map, converting to empty map');
+            correctedData['players'] = <String, dynamic>{};
+          }
+          
+          // Ensure matchLog exists and is a list
+          if (!correctedData.containsKey('matchLog')) {
+            correctedData['matchLog'] = [];
+          } else if (correctedData['matchLog'] is! List) {
+            correctedData['matchLog'] = [];
+          }
+          
+          // Make sure currentOrder exists and is a list
+          if (!correctedData.containsKey('currentOrder')) {
+            correctedData['currentOrder'] = [];
+          } else if (correctedData['currentOrder'] is! List) {
+            // If currentOrder is not a list, convert it
+            correctedData['currentOrder'] = [];
+          }
+          
+          // Make sure activeBeforePause exists and is a list
+          if (!correctedData.containsKey('activeBeforePause')) {
+            correctedData['activeBeforePause'] = [];
+          } else if (correctedData['activeBeforePause'] is! List) {
+            // If activeBeforePause is not a list, convert it
+            correctedData['activeBeforePause'] = [];
+          }
+          
+          // Set defaults for any missing properties
+          if (!correctedData.containsKey('matchDuration')) {
+            correctedData['matchDuration'] = 90 * 60;
+          }
+          if (!correctedData.containsKey('enableMatchDuration')) {
+            correctedData['enableMatchDuration'] = true;
+          }
+          if (!correctedData.containsKey('matchSegments')) {
+            correctedData['matchSegments'] = 2;
+          }
+          if (!correctedData.containsKey('currentPeriod')) {
+            correctedData['currentPeriod'] = 1;
+          }
+          if (!correctedData.containsKey('targetPlayDuration')) {
+            correctedData['targetPlayDuration'] = 16 * 60;
+          }
+          
+          // Handle other defaults
+          correctedData['isPaused'] = correctedData['isPaused'] ?? false;
+          correctedData['enableTargetDuration'] = correctedData['enableTargetDuration'] ?? false;
+          correctedData['matchTime'] = correctedData['matchTime'] ?? 0;
+          correctedData['matchStartTime'] = correctedData['matchStartTime'] ?? 0;
+          correctedData['matchRunning'] = correctedData['matchRunning'] ?? false;
+          correctedData['hasWhistlePlayed'] = correctedData['hasWhistlePlayed'] ?? false;
+          correctedData['enableSound'] = correctedData['enableSound'] ?? false;
+          
+          // Log our corrections
+          print('Corrected data properties: ${correctedData.keys.toList()}');
+          
+          // Normal case: use the corrected data
+          return Session.fromJson(correctedData);
+        }
+        
+        print('Warning: Received unexpected data type, returning default session');
+        return defaultSession;
       }
-      return Session();
+      
+      print('Failed to load session. Status: ${response.statusCode}, Body: ${response.body}');
+      return defaultSession; // Now this is in scope
     } catch (e) {
       print('Error loading session: $e');
-      return Session();
+      // Return a new session with explicit initialization for players and matchLog
+      return Session(
+        matchDuration: 90 * 60,
+        enableMatchDuration: true,
+        matchSegments: 2,
+        currentPeriod: 1,
+        players: <String, Player>{},
+        matchLog: <MatchLogEntry>[],
+      );
     }
   }
 

@@ -23,7 +23,7 @@ class SoccerTimeApp extends StatelessWidget {
             final mediaQuery = MediaQuery.of(context);
             return MediaQuery(
               data: mediaQuery.copyWith(
-                textScaleFactor: kIsWeb ? 1.0 : mediaQuery.textScaleFactor,
+                textScaler: TextScaler.linear(kIsWeb ? 1.0 : mediaQuery.textScaleFactor),
               ),
               child: child!,
             );

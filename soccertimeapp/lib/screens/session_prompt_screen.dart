@@ -4,9 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import '../providers/app_state.dart';
 import 'main_screen.dart';
-import 'package:http/http.dart' as http;
-import '../models/session.dart';
-import '../models/player.dart';
 
 class SessionPromptScreen extends StatefulWidget {
   @override

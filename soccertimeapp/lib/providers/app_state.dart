@@ -13,6 +13,7 @@ class AppState with ChangeNotifier {
   bool _isDarkTheme = true;
   Timer? _timer;
   bool _isSaving = false;
+  Timer? _saveDebounceTimer;
   final SessionService _sessionService = SessionService();
   final AudioService _audioService = AudioService();
 
@@ -52,43 +53,99 @@ class AppState with ChangeNotifier {
   Future<void> startOrResumeSession(String password) async {
     _currentSessionPassword = password;
     await _sessionService.saveSessionPassword(password);
-    bool exists = await checkSessionExists(password);
-    if (!exists) {
-      _session = Session(
-        matchDuration: 90 * 60, // 90 minutes
-        enableMatchDuration: true,
-        matchSegments: 2, // Ensure this is set to 2 for halves (H1, H2)
-        currentPeriod: 1,
-        players: <String, Player>{}, // Explicitly mutable map
-        matchLog: <MatchLogEntry>[], // Explicitly mutable list
-      );
-      try {
-        _session.matchLog.add(MatchLogEntry(
-          matchTime: formatTime(_session.matchTime),
-          timestamp: DateTime.now().toIso8601String(),
-          details: "New session '$password' started",
-        ));
-        print('New session created for password: $password');
-      } catch (e) {
-        print('Error adding match log entry for new session: $e');
-        // Optionally, reinitialize matchLog to ensure it's mutable
-        _session.matchLog = [];
-        _session.matchLog.add(MatchLogEntry(
-          matchTime: formatTime(_session.matchTime),
-          timestamp: DateTime.now().toIso8601String(),
-          details: "New session '$password' started",
-        ));
+    
+    try {
+      bool exists = await checkSessionExists(password);
+      print('Session exists: $exists for password: $password');
+      
+      if (!exists) {
+        _session = Session(
+          matchDuration: 90 * 60, // 90 minutes
+          enableMatchDuration: true,
+          matchSegments: 2, // Ensure this is set to 2 for halves (H1, H2)
+          currentPeriod: 1,
+          players: <String, Player>{}, // Explicitly mutable map
+          matchLog: <MatchLogEntry>[], // Explicitly mutable list
+        );
+        try {
+          _session.matchLog.add(MatchLogEntry(
+            matchTime: formatTime(_session.matchTime),
+            timestamp: DateTime.now().toIso8601String(),
+            details: "New session '$password' started",
+          ));
+          print('New session created for password: $password');
+        } catch (e) {
+          print('Error adding match log entry for new session: $e');
+          // Optionally, reinitialize matchLog to ensure it's mutable
+          _session.matchLog = [];
+          _session.matchLog.add(MatchLogEntry(
+            matchTime: formatTime(_session.matchTime),
+            timestamp: DateTime.now().toIso8601String(),
+            details: "New session '$password' started",
+          ));
+        }
+      } else {
+        try {
+          _session = await _sessionService.loadSession(password);
+          
+          // Verify that matchLog is properly initialized
+          if (_session.matchLog == null) {
+            print('Warning: matchLog was null, initializing empty list');
+            _session = Session(
+              matchDuration: _session.matchDuration,
+              enableMatchDuration: _session.enableMatchDuration,
+              matchSegments: _session.matchSegments,
+              currentPeriod: _session.currentPeriod,
+              players: _session.players,
+              matchLog: <MatchLogEntry>[],
+            );
+          }
+          
+          _session.matchLog.add(MatchLogEntry(
+            matchTime: formatTime(_session.matchTime),
+            timestamp: DateTime.now().toIso8601String(),
+            details: "Session '$password' resumed",
+          ));
+        } catch (e) {
+          print('Error in session loading: $e');
+          // Create a new session if loading fails
+          _session = Session(
+            matchDuration: 90 * 60,
+            enableMatchDuration: true,
+            matchSegments: 2,
+            currentPeriod: 1,
+            players: <String, Player>{},
+            matchLog: <MatchLogEntry>[],
+          );
+          _session.matchLog.add(MatchLogEntry(
+            matchTime: formatTime(_session.matchTime),
+            timestamp: DateTime.now().toIso8601String(),
+            details: "New session created due to loading error",
+          ));
+        }
       }
-    } else {
-      _session = await _sessionService.loadSession(password);
+      
+      await saveSession();
+      notifyListeners();
+    } catch (e) {
+      print('Error in startOrResumeSession: $e');
+      // Create a new session as fallback
+      _session = Session(
+        matchDuration: 90 * 60,
+        enableMatchDuration: true,
+        matchSegments: 2,
+        currentPeriod: 1,
+        players: <String, Player>{},
+        matchLog: <MatchLogEntry>[],
+      );
       _session.matchLog.add(MatchLogEntry(
         matchTime: formatTime(_session.matchTime),
         timestamp: DateTime.now().toIso8601String(),
-        details: "Session '$password' resumed",
+        details: "New emergency session for '$password'",
       ));
+      await saveSession();
+      notifyListeners();
     }
-    await saveSession();
-    notifyListeners();
   }
 
   Future<void> exitSession() async {
@@ -121,7 +178,9 @@ class AppState with ChangeNotifier {
   }
 
   void togglePlayer(String name) {
+    // Don't allow toggling if the period has ended
     if (_session.isPaused || _isPeriodEnd()) return;
+    
     var player = _session.players[name]!;
     var now = DateTime.now().millisecondsSinceEpoch;
     if (!player.active) {
@@ -219,8 +278,12 @@ class AppState with ChangeNotifier {
 
   // Match Timer Management
   void _startTimer() {
-    _timer = Timer.periodic(Duration(milliseconds: 1000), (timer) {
-      if (!_session.matchRunning || _session.isPaused || _isPeriodEnd()) return;
+    _timer = Timer.periodic(Duration(milliseconds: 500), (timer) {
+      if (!_session.matchRunning || _session.isPaused) return;
+      
+      // Check for period end first
+      if (_isPeriodEnd()) return;
+      
       var now = DateTime.now().millisecondsSinceEpoch;
       var anyPlayerActive = false;
       var maxPlayerTime = 0;
@@ -244,14 +307,6 @@ class AppState with ChangeNotifier {
         _session.matchTime = _session.matchTime > maxPlayerTime ? _session.matchTime : maxPlayerTime;
       }
 
-      if (_isPeriodEnd() && _session.enableMatchDuration) {
-        _session.matchRunning = false;
-        if (_session.enableSound && !_session.hasWhistlePlayed) {
-          _audioService.playWhistle();
-          _session.hasWhistlePlayed = true;
-        }
-      }
-
       saveSession();
       notifyListeners();
     });
@@ -260,7 +315,58 @@ class AppState with ChangeNotifier {
   bool _isPeriodEnd() {
     var periodDuration = _session.matchDuration / _session.matchSegments;
     var periodEndTime = _session.currentPeriod * periodDuration;
-    return _session.matchTime >= periodEndTime && _session.currentPeriod <= _session.matchSegments;
+    bool isPeriodEnd = _session.enableMatchDuration &&
+        _session.matchTime >= periodEndTime &&
+        _session.currentPeriod <= _session.matchSegments;
+    
+    // If we detect period end, ensure the session is paused
+    if (isPeriodEnd && !_session.isPaused) {
+      _pauseForPeriodEnd();
+    }
+    
+    return isPeriodEnd;
+  }
+
+  // New method to handle pausing specifically for period end
+  void _pauseForPeriodEnd() {
+    var now = DateTime.now().millisecondsSinceEpoch;
+    _session.activeBeforePause = [];
+    
+    // Store all active players
+    _session.players.forEach((name, player) {
+      if (player.active) {
+        _session.activeBeforePause.add(name);
+        var elapsed = (now - player.startTime) ~/ 1000;
+        player.totalTime += elapsed >= 0 ? elapsed : 0;
+        player.active = false;
+        player.startTime = 0;
+      }
+    });
+    
+    // Update match time
+    if (_session.matchRunning) {
+      var elapsed = (now - _session.matchStartTime) ~/ 1000;
+      _session.matchTime += elapsed >= 0 ? elapsed : 0;
+      _session.matchStartTime = 0;
+      _session.matchRunning = false;
+    }
+    
+    // Mark as paused and log the event
+    _session.isPaused = true;
+    _session.matchLog.add(MatchLogEntry(
+      matchTime: formatTime(_session.matchTime),
+      timestamp: DateTime.now().toIso8601String(),
+      details: "Period ${_session.currentPeriod} ended",
+    ));
+    
+    // Play whistle if enabled
+    if (_session.enableSound && !_session.hasWhistlePlayed) {
+      _audioService.playWhistle();
+      _session.hasWhistlePlayed = true;
+    }
+    
+    saveSession();
+    notifyListeners();
   }
 
   void pauseAll() {
@@ -317,35 +423,32 @@ class AppState with ChangeNotifier {
     var now = DateTime.now().millisecondsSinceEpoch;
     _session.currentPeriod++;
     _session.hasWhistlePlayed = false;
+    
     if (_session.currentPeriod <= _session.matchSegments) {
-      _session.matchStartTime = now;
-      _session.matchRunning = true;
-      for (var name in _session.activeBeforePause) {
-        var player = _session.players[name];
-        if (player != null) {
-          player.active = true;
-          player.startTime = now;
-        }
-      }
-      _session.activeBeforePause = [];
+      // Don't automatically start the match - keep it paused
+      _session.matchRunning = false;
+      
       var periodName = _getPeriodLabel(_session.currentPeriod, _session.matchSegments);
       _session.matchLog.add(MatchLogEntry(
         matchTime: formatTime(_session.matchTime),
         timestamp: DateTime.now().toIso8601String(),
-        details: "$periodName started",
+        details: "$periodName ready to start",
       ));
-      _session.isPaused = false;
+      
+      // Keep isPaused true to require explicit resuming
+      _session.isPaused = true;
     } else {
       _session.matchRunning = false;
       _session.matchTime = _session.matchDuration;
       _session.currentPeriod = _session.matchSegments + 1;
-      _session.isPaused = false;
+      _session.isPaused = false; // Game is over, no need to keep paused
       _session.matchLog.add(MatchLogEntry(
         matchTime: formatTime(_session.matchTime),
         timestamp: DateTime.now().toIso8601String(),
         details: "Match completed",
       ));
     }
+    
     saveSession();
     notifyListeners();
   }
@@ -356,50 +459,85 @@ class AppState with ChangeNotifier {
   }
 
   // Settings Management
-  void toggleMatchDuration(bool value) {
+  Future<void> toggleMatchDuration(bool value) async {
     _session.enableMatchDuration = value;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
-  void updateMatchDuration(int minutes) {
+  Future<void> updateMatchDuration(int minutes) async {
     _session.matchDuration = minutes * 60;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
-  void updateMatchSegments(int segments) {
+  Future<void> updateMatchSegments(int segments) async {
     _session.matchSegments = segments;
     _session.currentPeriod = 1;
     _session.hasWhistlePlayed = false;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
-  void toggleTargetDuration(bool value) {
+  Future<void> toggleTargetDuration(bool value) async {
     _session.enableTargetDuration = value;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
-  void updateTargetDuration(int minutes) {
+  Future<void> updateTargetDuration(int minutes) async {
     _session.targetPlayDuration = minutes * 60;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
-  void toggleSound(bool value) {
+  Future<void> toggleSound(bool value) async {
     _session.enableSound = value;
-    saveSession();
+    await saveSession(immediate: true);
     notifyListeners();
   }
 
   // Session Persistence
-  Future<void> saveSession() async {
-    if (_currentSessionPassword == null || _isSaving) return;
-    _isSaving = true;
-    await _sessionService.saveSession(_currentSessionPassword!, _session);
-    _isSaving = false;
+  Future<void> saveSession({bool immediate = false}) async {
+    if (_currentSessionPassword == null) return;
+    
+    // Cancel any pending save operations
+    _saveDebounceTimer?.cancel();
+    
+    // For immediate saves, don't use debounce
+    if (immediate) {
+      if (_isSaving) {
+        // Wait for current save to finish
+        await Future.delayed(Duration(milliseconds: 100));
+        return saveSession(immediate: true);
+      }
+      
+      try {
+        _isSaving = true;
+        await _sessionService.saveSession(_currentSessionPassword!, _session);
+        print('Session saved immediately at ${DateTime.now()}');
+      } catch (e) {
+        print('Error saving session immediately: $e');
+      } finally {
+        _isSaving = false;
+      }
+      return;
+    }
+    
+    // For regular saves, use debounce
+    _saveDebounceTimer = Timer(Duration(milliseconds: 300), () async {
+      if (_isSaving) return;
+      
+      try {
+        _isSaving = true;
+        await _sessionService.saveSession(_currentSessionPassword!, _session);
+        print('Session saved at ${DateTime.now()}');
+      } catch (e) {
+        print('Error saving session: $e');
+      } finally {
+        _isSaving = false;
+      }
+    });
   }
 
   Future<String?> loadSessionPassword() async {
@@ -437,6 +575,7 @@ class AppState with ChangeNotifier {
   @override
   void dispose() {
     _timer?.cancel();
+    _saveDebounceTimer?.cancel();
     super.dispose();
   }
 }

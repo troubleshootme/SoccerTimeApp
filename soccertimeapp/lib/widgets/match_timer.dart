@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../utils/format_time.dart';
-import '../models/session.dart';
 
 class MatchTimer extends StatelessWidget {
   @override

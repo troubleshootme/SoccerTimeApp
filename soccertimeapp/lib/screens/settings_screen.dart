@@ -25,6 +25,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
+        // Update controllers if values have changed
+        if (_matchDurationController.text != (appState.session.matchDuration ~/ 60).toString()) {
+          _matchDurationController.text = (appState.session.matchDuration ~/ 60).toString();
+        }
+        
+        if (_targetDurationController.text != (appState.session.targetPlayDuration ~/ 60).toString()) {
+          _targetDurationController.text = (appState.session.targetPlayDuration ~/ 60).toString();
+        }
+        
         return Scaffold(
           appBar: AppBar(
             title: Text('Settings'),
@@ -38,7 +47,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Expanded(child: Text('Match Duration')),
                     Switch(
                       value: appState.session.enableMatchDuration,
-                      onChanged: (value) => appState.toggleMatchDuration(value),
+                      onChanged: (value) async {
+                        await appState.toggleMatchDuration(value);
+                      },
                     ),
                     if (appState.session.enableMatchDuration)
                       Expanded(
@@ -46,7 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _matchDurationController,
                           keyboardType: TextInputType.number,
                           decoration: InputDecoration(labelText: 'Minutes'),
-                          onSubmitted: (value) {
+                          onChanged: (value) {
                             var minutes = int.tryParse(value) ?? 90;
                             if (minutes >= 1) appState.updateMatchDuration(minutes);
                           },
@@ -75,7 +86,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Expanded(child: Text('Target Play Duration')),
                     Switch(
                       value: appState.session.enableTargetDuration,
-                      onChanged: (value) => appState.toggleTargetDuration(value),
+                      onChanged: (value) async {
+                        await appState.toggleTargetDuration(value);
+                      },
                     ),
                     if (appState.session.enableTargetDuration)
                       Expanded(
@@ -83,9 +96,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _targetDurationController,
                           keyboardType: TextInputType.number,
                           decoration: InputDecoration(labelText: 'Minutes'),
-                          onSubmitted: (value) {
+                          onChanged: (value) async {
                             var minutes = int.tryParse(value) ?? 16;
-                            if (minutes >= 1) appState.updateTargetDuration(minutes);
+                            if (minutes >= 1) await appState.updateTargetDuration(minutes);
                           },
                         ),
                       ),
@@ -157,6 +170,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text('Restore Session'),
                 ),
                 ElevatedButton(
+                  onPressed: () async {
+                    // Save all current settings explicitly
+                    var appState = Provider.of<AppState>(context, listen: false);
+                    
+                    // Update from controllers
+                    var matchMinutes = int.tryParse(_matchDurationController.text) ?? 90;
+                    var targetMinutes = int.tryParse(_targetDurationController.text) ?? 16;
+                    
+                    // Use a transaction-like approach to update all settings at once
+                    await appState.updateMatchDuration(matchMinutes);
+                    await appState.updateTargetDuration(targetMinutes);
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Settings saved successfully')),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                  child: Text('Save Settings'),
+                ),
+                ElevatedButton(
                   onPressed: () => Navigator.pop(context),
                   child: Text('Close'),
                 ),
@@ -166,5 +201,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       },
     );
+  }
+  
+  @override
+  void dispose() {
+    _matchDurationController.dispose();
+    _targetDurationController.dispose();
+    super.dispose();
   }
 }
