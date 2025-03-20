@@ -1,0 +1,6 @@
+# Welcome to SoccerTimeApp
+
+**New features in 1.0.23:**
+- Export Feature has been moved to Settings, it is now "Export Times to CSV"
+- Added Session Backup and Restore Feature in Settings
+- Added Setting for Light or Dark Theme, the Default is Dark Theme 
