@@ -4,7 +4,7 @@ import 'database.dart';
 class SessionDialog extends StatelessWidget {
   final Function(int sessionId) onSessionSelected;
 
-  const SessionDialog({super.key, required this.onSessionSelected});
+  const SessionDialog({Key? key, required this.onSessionSelected}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
