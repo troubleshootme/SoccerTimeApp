@@ -1,11 +1,19 @@
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
+import 'dart:io';
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
   static Database? _database;
 
-  SessionDatabase._init();
+  SessionDatabase._init() {
+    // Initialize FFI for desktop platforms
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi; // Use FFI database factory
+    }
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;

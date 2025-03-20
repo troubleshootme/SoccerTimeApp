@@ -11,7 +11,7 @@ import '../database.dart';
 class AppState with ChangeNotifier {
   Session _session = Session();
   String? _currentSessionPassword;
-  bool _isDarkTheme = true;
+  bool _isDarkTheme = false;
   Timer? _timer;
   bool _isSaving = false;
   Timer? _saveDebounceTimer;
@@ -166,6 +166,7 @@ class AppState with ChangeNotifier {
     if (_currentSessionId != null) {
       await SessionDatabase.instance.insertPlayer(_currentSessionId!, name, 0);
       _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
+      _players.sort((a, b) => a['name'].compareTo(b['name'])); // Sort players by name
     }
     notifyListeners();
   }
@@ -568,12 +569,21 @@ class AppState with ChangeNotifier {
   Future<void> loadSession(int sessionId) async {
     _currentSessionId = sessionId;
     _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
+    _players.sort((a, b) => a['name'].compareTo(b['name'])); // Sort players by name
     notifyListeners();
   }
 
   Future<void> createSession(String name) async {
     _currentSessionId = await SessionDatabase.instance.insertSession(name);
-    _players = [];
+    _players = []; // Reset players for the new session
+    notifyListeners();
+  }
+
+  Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
+    if (_currentSessionId != null) {
+      await SessionDatabase.instance.updatePlayerTimer(playerId, timerSeconds);
+      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
+    }
     notifyListeners();
   }
 
