@@ -4,8 +4,7 @@ import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
-// Conditionally import dart:io only for non-web platforms
-import 'dart:io' if (dart.library.html) 'dart:html' as io;
+import 'dart:io' show Platform; // Top-level import for non-web platforms
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
@@ -13,10 +12,12 @@ class SessionDatabase {
   static SharedPreferences? _prefs;
 
   SessionDatabase._init() {
-    // Only initialize FFI on non-web platforms where dart:io is available
-    if (!kIsWeb && (io.Platform.isWindows || io.Platform.isLinux || io.Platform.isMacOS)) {
-      sqfliteFfiInit();
-      databaseFactory = databaseFactoryFfi;
+    if (!kIsWeb) {
+      // Only use Platform on non-web platforms where dart:io is available
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+      }
     }
   }
 
@@ -28,11 +29,9 @@ class SessionDatabase {
   }
 
   Future<SharedPreferences> get prefs async {
-    if (kIsWeb) {
-      _prefs ??= await SharedPreferences.getInstance();
-      return _prefs!;
-    }
-    throw UnsupportedError('SharedPreferences only for web');
+    if (!kIsWeb) throw UnsupportedError('SharedPreferences only for web');
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
   }
 
   Future<Database> _initDB(String filePath) async {
@@ -104,12 +103,13 @@ class SessionDatabase {
   Future<int> insertPlayer(int sessionId, String name, int timerSeconds) async {
     if (kIsWeb) {
       final prefs = await this.prefs;
-      final players = prefs.getString('players_$sessionId') ?? '[]';
+      final playersKey = 'players_$sessionId';
+      final players = prefs.getString(playersKey) ?? '[]';
       final playerList = List<Map<String, dynamic>>.from(jsonDecode(players));
       final newId = playerList.isEmpty ? 1 : playerList.map((p) => p['id'] as int).reduce((a, b) => a > b ? a : b) + 1;
       final player = {'id': newId, 'session_id': sessionId, 'name': name, 'timer_seconds': timerSeconds};
       playerList.add(player);
-      await prefs.setString('players_$sessionId', jsonEncode(playerList));
+      await prefs.setString(playersKey, jsonEncode(playerList));
       return newId;
     } else {
       final db = await database;
@@ -120,8 +120,16 @@ class SessionDatabase {
 
   Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
     if (kIsWeb) {
-      // Handle updating player timer in SharedPreferences if needed
-      throw UnsupportedError('Updating player timer not supported on web');
+      final prefs = await this.prefs;
+      final sessionId = (await getAllSessions()).firstWhere((s) => s['id'] == playerId, orElse: () => {'id': -1})['session_id'] ?? -1;
+      final playersKey = 'players_$sessionId';
+      final players = prefs.getString(playersKey) ?? '[]';
+      final playerList = List<Map<String, dynamic>>.from(jsonDecode(players));
+      final playerIndex = playerList.indexWhere((p) => p['id'] == playerId);
+      if (playerIndex != -1) {
+        playerList[playerIndex]['timer_seconds'] = timerSeconds;
+        await prefs.setString(playersKey, jsonEncode(playerList));
+      }
     } else {
       final db = await database;
       await db.update(
@@ -134,7 +142,9 @@ class SessionDatabase {
   }
 
   Future close() async {
-    final db = await database;
-    db.close();
+    if (!kIsWeb) {
+      final db = await database;
+      db.close();
+    }
   }
 }
