@@ -60,6 +60,16 @@ class SessionDatabase {
     return await db.insert('players', data);
   }
 
+  Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
+    final db = await database;
+    await db.update(
+      'players',
+      {'timer_seconds': timerSeconds},
+      where: 'id = ?',
+      whereArgs: [playerId],
+    );
+  }
+
   Future close() async {
     final db = await database;
     db.close();

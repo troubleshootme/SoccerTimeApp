@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import '../providers/app_state.dart';
-import 'main_screen.dart';
 import '../session_dialog.dart';
 
 class SessionPromptScreen extends StatefulWidget {
