@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/session_prompt_screen.dart';
+import 'screens/main_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'providers/app_state.dart';
 
@@ -27,7 +28,7 @@ class SoccerTimeApp extends StatelessWidget {
           ),
           home: SessionPromptScreen(),
           routes: {
-            '/main': (context) => MainScreen(), // Replace with your main screen
+            '/main': (context) => MainScreen(),
           },
         );
       },
