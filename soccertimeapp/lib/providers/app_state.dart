@@ -6,19 +6,16 @@ import '../models/match_log_entry.dart';
 import '../services/session_service.dart';
 import '../services/audio_service.dart';
 import '../utils/format_time.dart';
-import '../database.dart';
 
 class AppState with ChangeNotifier {
   Session _session = Session();
   String? _currentSessionPassword;
-  bool _isDarkTheme = false;
+  bool _isDarkTheme = true;
   Timer? _timer;
   bool _isSaving = false;
   Timer? _saveDebounceTimer;
   final SessionService _sessionService = SessionService();
   final AudioService _audioService = AudioService();
-  int? _currentSessionId;
-  List<Map<String, dynamic>> _players = [];
 
   AppState() {
     _loadTheme();
@@ -29,8 +26,6 @@ class AppState with ChangeNotifier {
   Session get session => _session;
   String? get currentSessionPassword => _currentSessionPassword;
   bool get isDarkTheme => _isDarkTheme;
-  int? get currentSessionId => _currentSessionId;
-  List<Map<String, dynamic>> get players => _players;
 
   // Setter for session
   set session(Session newSession) {
@@ -162,12 +157,23 @@ class AppState with ChangeNotifier {
   }
 
   // Player Management
-  Future<void> addPlayer(String name) async {
-    if (_currentSessionId != null) {
-      await SessionDatabase.instance.insertPlayer(_currentSessionId!, name, 0);
-      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
-      _players.sort((a, b) => a['name'].compareTo(b['name'])); // Sort players by name
+  void addPlayer(String name) {
+    if (_session.players.containsKey(name)) return;
+    var player = Player(name: name);
+    try {
+      _session.players[name] = player; // Attempt to add player
+    } catch (e) {
+      print('Error adding player: $e');
+      // Reinitialize session with the new player
+      _session = Session(players: {..._session.players, name: player}, matchLog: _session.matchLog);
     }
+    _session.currentOrder.add(name);
+    _session.matchLog.add(MatchLogEntry(
+      matchTime: formatTime(_session.matchTime),
+      timestamp: DateTime.now().toIso8601String(),
+      details: "$name added to roster",
+    ));
+    saveSession();
     notifyListeners();
   }
 
@@ -563,27 +569,6 @@ class AppState with ChangeNotifier {
       ));
     }
     await saveSession();
-    notifyListeners();
-  }
-
-  Future<void> loadSession(int sessionId) async {
-    _currentSessionId = sessionId;
-    _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
-    _players.sort((a, b) => a['name'].compareTo(b['name'])); // Sort players by name
-    notifyListeners();
-  }
-
-  Future<void> createSession(String name) async {
-    _currentSessionId = await SessionDatabase.instance.insertSession(name);
-    _players = []; // Reset players for the new session
-    notifyListeners();
-  }
-
-  Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
-    if (_currentSessionId != null) {
-      await SessionDatabase.instance.updatePlayerTimer(playerId, timerSeconds);
-      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
-    }
     notifyListeners();
   }
 
