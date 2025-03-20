@@ -4,6 +4,8 @@ import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
+// Conditionally import dart:io only for non-web platforms
+import 'dart:io' if (dart.library.html) 'dart:html' as io;
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
@@ -11,8 +13,8 @@ class SessionDatabase {
   static SharedPreferences? _prefs;
 
   SessionDatabase._init() {
-    // Initialize FFI for desktop platforms
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    // Only initialize FFI on non-web platforms where dart:io is available
+    if (!kIsWeb && (io.Platform.isWindows || io.Platform.isLinux || io.Platform.isMacOS)) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
