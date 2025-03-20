@@ -19,15 +19,6 @@ class SoccerTimeApp extends StatelessWidget {
     return Consumer<AppState>(
       builder: (context, appState, child) {
         return MaterialApp(
-          builder: (context, child) {
-            final mediaQuery = MediaQuery.of(context);
-            return MediaQuery(
-              data: mediaQuery.copyWith(
-                textScaler: TextScaler.linear(kIsWeb ? 1.0 : mediaQuery.textScaleFactor),
-              ),
-              child: child!,
-            );
-          },
           title: 'SoccerTimeApp',
           theme: ThemeData(
             primarySwatch: Colors.blue,
@@ -35,6 +26,9 @@ class SoccerTimeApp extends StatelessWidget {
             fontFamily: 'Verdana',
           ),
           home: SessionPromptScreen(),
+          routes: {
+            '/main': (context) => MainScreen(), // Replace with your main screen
+          },
         );
       },
     );
