@@ -20,11 +20,12 @@ class PeriodEndDialog extends StatelessWidget {
       return WillPopScope(
         onWillPop: () async {
           // Prevent back button from dismissing dialog without handling state
-          if (Navigator.of(context).canPop()) {
-            // Handle state before popping
+          if (isGameOver) {
+            // Only allow dismissal when game is over
             appState.saveSession();
+            return true;
           }
-          return false; // Don't allow automatic pop
+          return false; // Don't allow pop during mid-game periods
         },
         child: AlertDialog(
           title: Text(
@@ -37,21 +38,7 @@ class PeriodEndDialog extends StatelessWidget {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                isGameOver
-                    ? 'The game has ended.'
-                    : 'Period $currentPeriod has ended.',
-                style: TextStyle(fontSize: 16),
-              ),
-              SizedBox(height: 16),
-              if (!isGameOver)
-                Text(
-                  'Start Period ${currentPeriod + 1}?',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              // Remove redundant text entirely
             ],
           ),
           actions: [
@@ -76,17 +63,18 @@ class PeriodEndDialog extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                 ),
-                child: Text('Start Next Period'),
+                child: Text('Start Period ${currentPeriod + 1}'),
               ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
+            if (isGameOver) // Only show OK button if game is over
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                ),
+                child: Text('OK'),
               ),
-              child: Text(isGameOver ? 'OK' : 'Close'),
-            ),
           ],
         ),
       );

@@ -2,48 +2,37 @@ import '../models/player.dart';
 import '../models/match_log_entry.dart';
 
 class Session {
-  Map<String, Player> players;
-  List<String> currentOrder;
-  bool isPaused;
-  List<String> activeBeforePause;
-  int targetPlayDuration;
-  bool enableTargetDuration;
-  int matchTime;
-  int matchStartTime;
-  bool matchRunning;
-  int matchDuration;
+  final Map<String, Player> players = {};
+  final List<String> currentOrder = [];
+  List<String> activeBeforePause = [];
+  
+  int matchTime = 0;
+  int currentPeriod = 1;
+  bool hasWhistlePlayed = false;
+  bool matchRunning = false;
+  bool isPaused = false;
+  
+  // Settings
   bool enableMatchDuration;
+  int matchDuration;
   int matchSegments;
-  int currentPeriod;
-  bool hasWhistlePlayed;
+  bool enableTargetDuration;
+  int targetPlayDuration;
   bool enableSound;
-  List<MatchLogEntry> matchLog;
+  
+  // Session name
   String sessionName;
-
+  
   Session({
-    Map<String, Player>? players,
-    List<String>? currentOrder,
-    this.isPaused = false,
-    List<String>? activeBeforePause,
-    this.targetPlayDuration = 16 * 60,
-    this.enableTargetDuration = false,
-    this.matchTime = 0,
-    this.matchStartTime = 0,
-    this.matchRunning = false,
-    this.matchDuration = 90 * 60,
-    this.enableMatchDuration = false,
-    this.matchSegments = 2,
-    this.currentPeriod = 1,
-    this.hasWhistlePlayed = false,
-    this.enableSound = false,
-    List<MatchLogEntry>? matchLog,
     this.sessionName = '',
-  }) : players = players ?? <String, Player>{},
-       currentOrder = currentOrder ?? <String>[],
-       activeBeforePause = activeBeforePause ?? <String>[],
-       matchLog = matchLog ?? <MatchLogEntry>[];
-
-  // Add a player to the session
+    this.enableMatchDuration = false,
+    this.matchDuration = 5400, // 90 minutes in seconds
+    this.matchSegments = 2,
+    this.enableTargetDuration = false,
+    this.targetPlayDuration = 1200, // 20 minutes in seconds
+    this.enableSound = true,
+  });
+  
   void addPlayer(String name) {
     if (!players.containsKey(name)) {
       players[name] = Player(name: name);
@@ -51,11 +40,38 @@ class Session {
     }
   }
   
-  // Update a player's time
   void updatePlayerTime(String name, int seconds) {
     if (players.containsKey(name)) {
       players[name]!.totalTime = seconds;
       players[name]!.time = seconds;
+    }
+  }
+  
+  void resetAllPlayers() {
+    // Reset all player timers but keep the players
+    for (var player in players.values) {
+      player.totalTime = 0;
+      player.time = 0;
+      player.active = false;
+      player.startTime = 0;
+    }
+  }
+  
+  void resetSessionState() {
+    // Reset match time and period tracking
+    matchTime = 0;
+    currentPeriod = 1;
+    hasWhistlePlayed = false;
+    matchRunning = false;
+    isPaused = false;
+    
+    // Clear active before pause list
+    activeBeforePause.clear();
+  }
+  
+  void togglePlayerActive(String name) {
+    if (players.containsKey(name)) {
+      players[name]!.active = !players[name]!.active;
     }
   }
 
@@ -67,7 +83,7 @@ class Session {
         'targetPlayDuration': targetPlayDuration,
         'enableTargetDuration': enableTargetDuration,
         'matchTime': matchTime,
-        'matchStartTime': matchStartTime,
+        'matchStartTime': 0,
         'matchRunning': matchRunning,
         'matchDuration': matchDuration,
         'enableMatchDuration': enableMatchDuration,
@@ -75,31 +91,17 @@ class Session {
         'currentPeriod': currentPeriod,
         'hasWhistlePlayed': hasWhistlePlayed,
         'enableSound': enableSound,
-        'matchLog': matchLog.map((entry) => entry.toJson()).toList(),
+        'matchLog': [],
         'sessionName': sessionName,
       };
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
-        players: (json['players'] as Map<String, dynamic>?)?.map(
-              (key, value) => MapEntry(key, Player.fromJson(Map<String, dynamic>.from(value)..['name'] = key)),
-            ) ?? <String, Player>{},
-        currentOrder: List<String>.from(json['currentOrder'] ?? []),
-        isPaused: json['isPaused'] ?? false,
-        activeBeforePause: List<String>.from(json['activeBeforePause'] ?? []),
-        targetPlayDuration: json['targetPlayDuration'] ?? 16 * 60,
-        enableTargetDuration: json['enableTargetDuration'] ?? false,
-        matchTime: json['matchTime'] ?? 0,
-        matchStartTime: json['matchStartTime'] ?? 0,
-        matchRunning: json['matchRunning'] ?? false,
-        matchDuration: json['matchDuration'] ?? 90 * 60,
-        enableMatchDuration: json['enableMatchDuration'] ?? false,
-        matchSegments: json['matchSegments'] ?? 2,
-        currentPeriod: json['currentPeriod'] ?? 1,
-        hasWhistlePlayed: json['hasWhistlePlayed'] ?? false,
-        enableSound: json['enableSound'] ?? false,
         sessionName: json['sessionName'] ?? '',
-        matchLog: (json['matchLog'] as List?)
-                ?.map((e) => MatchLogEntry.fromJson(e as Map<String, dynamic>))
-                .toList() ?? <MatchLogEntry>[],
+        enableMatchDuration: json['enableMatchDuration'] ?? false,
+        matchDuration: json['matchDuration'] ?? 5400,
+        matchSegments: json['matchSegments'] ?? 2,
+        enableTargetDuration: json['enableTargetDuration'] ?? false,
+        targetPlayDuration: json['targetPlayDuration'] ?? 1200,
+        enableSound: json['enableSound'] ?? true,
       );
 }

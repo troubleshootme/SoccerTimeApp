@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/app_state.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
 import '../session_dialog.dart';
+import '../hive_database.dart';
+import '../providers/app_state.dart';
+import 'package:provider/provider.dart';
+import 'main_screen.dart';
 import '../utils/app_themes.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SessionPromptScreen extends StatefulWidget {
   @override
@@ -10,11 +15,15 @@ class SessionPromptScreen extends StatefulWidget {
 }
 
 class _SessionPromptScreenState extends State<SessionPromptScreen> {
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
+    
+    // Show session dialog after build is complete
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showSessionDialog(context);
+      _showSessionDialog();
     });
   }
 
@@ -69,7 +78,7 @@ class _SessionPromptScreenState extends State<SessionPromptScreen> {
             ),
             SizedBox(height: 32),
             ElevatedButton(
-              onPressed: () => _showSessionDialog(context),
+              onPressed: () => _showSessionDialog(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: isDark ? AppThemes.darkSecondaryBlue : AppThemes.lightSecondaryBlue,
                 padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
@@ -86,17 +95,68 @@ class _SessionPromptScreenState extends State<SessionPromptScreen> {
     );
   }
 
-  void _showSessionDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => SessionDialog(
-        onSessionSelected: (sessionId) async {
-          final appState = Provider.of<AppState>(context, listen: false);
-          await appState.loadSession(sessionId);
-          Navigator.pushReplacementNamed(context, '/main');
-        },
-      ),
-    );
+  void _showSessionDialog() {
+    // Initialize the database for the dialog
+    HiveSessionDatabase.instance.init().then((_) {
+      showDialog(
+        context: context,
+        barrierDismissible: false, // User must select a session
+        builder: (context) => SessionDialog(
+          onSessionSelected: (sessionId) async {
+            try {
+              print('Session selected: $sessionId');
+              
+              // Load the session
+              final appState = Provider.of<AppState>(context, listen: false);
+              
+              // Get the session name before loading
+              final allSessions = await HiveSessionDatabase.instance.getAllSessions();
+              final sessionInfo = allSessions.firstWhere(
+                (s) => s['id'] == sessionId, 
+                orElse: () => {'name': ''}
+              );
+              
+              final sessionName = sessionInfo['name'] ?? '';
+              print('Session name from dialog: "$sessionName"');
+              
+              await appState.loadSession(sessionId);
+              
+              print('Session loaded, navigating to main screen');
+              print('Final session name: "${appState.session.sessionName}"');
+              print('Current session password: "${appState.currentSessionPassword}"');
+              
+              // Use pushReplacement instead of pop + push to avoid navigation issues
+              if (mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => MainScreen()),
+                );
+              }
+            } catch (e) {
+              print('Error loading session: $e');
+              // Show error dialog but stay on this screen
+              if (mounted) {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text('Session Error'),
+                    content: Text('Could not load the session: $e'),
+                    actions: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context); // Close error dialog
+                          _showSessionDialog(); // Show session selection again
+                        },
+                        child: Text('Try Again'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            }
+          },
+        ),
+      );
+    });
   }
 }

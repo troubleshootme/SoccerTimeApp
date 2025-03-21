@@ -6,6 +6,7 @@ import '../screens/settings_screen.dart';
 import '../models/player.dart';
 import 'dart:async';
 import '../widgets/period_end_dialog.dart';
+import '../services/audio_service.dart';
 
 class MainScreen extends StatefulWidget {
   @override
@@ -20,6 +21,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isTableExpanded = true;
   final FocusNode _addPlayerFocusNode = FocusNode();
   bool _isInitialized = false;
+  final AudioService _audioService = AudioService();
 
   @override
   void initState() {
@@ -63,15 +65,45 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     try {
       final appState = Provider.of<AppState>(context, listen: false);
       
+      print('_loadInitialState: Current session ID: ${appState.currentSessionId}');
+      print('_loadInitialState: Session object name: "${appState.session.sessionName}"');
+      print('_loadInitialState: Current session password: "${appState.currentSessionPassword}"');
+      
       _safeSetState(() {
         _matchTime = appState.session.matchTime * 2;
         _isPaused = appState.session.isPaused;
         
-        // Use session name from the session object or currentSessionPassword
-        _sessionName = appState.session.sessionName.isNotEmpty 
-            ? appState.session.sessionName 
-            : (appState.currentSessionPassword ?? "New Session");
-            
+        // Determine the session name to display in the UI
+        String nameToDisplay = '';
+        
+        // First priority: Use currentSessionPassword if available (this comes from the database)
+        if (appState.currentSessionPassword != null && appState.currentSessionPassword!.isNotEmpty) {
+          nameToDisplay = appState.currentSessionPassword!;
+          print('_loadInitialState: Using currentSessionPassword for display: "$nameToDisplay"');
+        } 
+        // Second priority: Use session object name
+        else if (appState.session.sessionName.isNotEmpty) {
+          nameToDisplay = appState.session.sessionName;
+          print('_loadInitialState: Using session.sessionName for display: "$nameToDisplay"');
+        }
+        // Last resort: Use a default with the session ID
+        else if (appState.currentSessionId != null) {
+          // Check in sessions list for a better name
+          final sessionInfo = appState.sessions.firstWhere(
+            (s) => s['id'] == appState.currentSessionId,
+            orElse: () => {'name': 'Session ${appState.currentSessionId}'}
+          );
+          nameToDisplay = sessionInfo['name'] ?? 'Session ${appState.currentSessionId}';
+          print('_loadInitialState: Using sessions list or fallback: "$nameToDisplay"');
+        } else {
+          nameToDisplay = 'New Session';
+          print('_loadInitialState: Using default name: "$nameToDisplay"');
+        }
+        
+        // Set the session name for display
+        _sessionName = nameToDisplay;
+        print('_loadInitialState: Final name for display: "$_sessionName"');
+        
         _isInitialized = true;
       });
       
@@ -83,6 +115,30 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
     } catch (e) {
       print('Error loading initial state: $e');
+      // Show an error message and allow user to return to session list
+      if (mounted) {
+        _safeSetState(() {
+          _isInitialized = true; // Set to true so we show error not loading
+        });
+        
+        // Show a snackbar with the error
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error loading session data: ${e.toString()}'),
+                duration: Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Return',
+                  onPressed: () {
+                    Navigator.of(context).pushReplacementNamed('/');
+                  },
+                ),
+              ),
+            );
+          }
+        });
+      }
     }
   }
 
@@ -97,6 +153,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _matchTimer = null;
     }
     _addPlayerFocusNode.dispose();
+    
+    // Dispose the audio service
+    _audioService.dispose();
+    
     super.dispose();
   }
 
@@ -249,6 +309,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           controller: textController,
           focusNode: _addPlayerFocusNode,
           autofocus: true,
+          textCapitalization: TextCapitalization.words,
           decoration: InputDecoration(hintText: 'Player Name'),
           onSubmitted: (value) async {
             if (value.isNotEmpty) {
@@ -364,6 +425,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       // Pause the game and save active players
       _pauseAll();
       
+      // Play whistle sound
+      _playWhistle(isMatchEnd: appState.session.currentPeriod >= appState.session.matchSegments);
+      
       // Show period end dialog after a short delay to ensure UI updates first
       if (mounted) {
         Future.delayed(Duration(milliseconds: 100), () {
@@ -399,6 +463,30 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           }
         });
       }
+    }
+  }
+  
+  // Helper method to play whistle sounds
+  void _playWhistle({bool isMatchEnd = false}) async {
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      // Only play sound if it's enabled in settings
+      if (appState.session.enableSound) {
+        // Play first whistle sound
+        await _audioService.playWhistle();
+        
+        // Play second whistle sound if it's match end
+        if (isMatchEnd) {
+          // Wait a short moment before playing the second whistle
+          await Future.delayed(Duration(milliseconds: 800));
+          await _audioService.playWhistle();
+        }
+      } else {
+        // Log that sound was requested but disabled
+        print('Whistle sound was requested but sound is disabled in settings');
+      }
+    } catch (e) {
+      print('Error playing whistle sound: $e');
     }
   }
 
@@ -475,6 +563,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         content: TextField(
           controller: textController,
           autofocus: true,
+          textCapitalization: TextCapitalization.words,
           decoration: InputDecoration(hintText: 'Player Name'),
         ),
         actions: [
@@ -554,12 +643,90 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
     }
     
+    // Ensure session name is always displayed - fix blank session name
+    if (_sessionName.isEmpty && appState.currentSessionPassword != null) {
+      // Don't call setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _safeSetState(() {
+          _sessionName = appState.currentSessionPassword ?? "Unnamed Session";
+          print('Fixed blank session name to: "$_sessionName"');
+        });
+      });
+    }
+    
     // If app state isn't ready yet, show a loading screen
     if (!_isInitialized) {
       return Scaffold(
         backgroundColor: isDark ? AppThemes.darkBackground : AppThemes.lightBackground,
         body: Center(
-          child: CircularProgressIndicator(),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text(
+                'Loading session data...',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    // If there was an error loading the session, show a simple error screen
+    if (appState.currentSessionId == null) {
+      return Scaffold(
+        backgroundColor: isDark ? AppThemes.darkBackground : AppThemes.lightBackground,
+        appBar: AppBar(
+          title: Text('Session Error'),
+          backgroundColor: Colors.red,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  color: Colors.red,
+                  size: 48,
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'There was an error loading the session',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'The session may be in read-only mode or the data might be corrupted',
+                  style: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pushReplacementNamed('/');
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                  ),
+                  child: Text('Return to Sessions'),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -582,8 +749,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                         color: isDark ? AppThemes.darkCardBackground : AppThemes.lightCardBackground,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      child: Column(
                         children: [
                           Text(
                             _sessionName,
@@ -594,6 +760,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                               letterSpacing: 1.2,
                             ),
                           ),
+                          if (appState.isReadOnlyMode)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.lock_outline,
+                                    size: 12,
+                                    color: Colors.orange,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Read-Only Mode',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontStyle: FontStyle.italic,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -630,15 +819,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                   ),
                                   // Position the period indicator to the right of the timer
                                   Positioned(
-                                    left: MediaQuery.of(context).size.width / 2 + 50, // Increased offset for better positioning
+                                    left: MediaQuery.of(context).size.width / 2 + 65, // Moved 5 pixels more to the right
                                     top: 4,
                                     child: Padding(
-                                      padding: EdgeInsets.all(4),
+                                      padding: EdgeInsets.all(8), // Increased padding around the indicator
                                       child: Container(
-                                        padding: EdgeInsets.all(4),
+                                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6), // More internal padding
                                         decoration: BoxDecoration(
                                           color: Colors.blue,
-                                          shape: BoxShape.circle,
+                                          borderRadius: BorderRadius.circular(12), // Using rounded rectangle instead of circle
                                         ),
                                         child: Text(
                                           appState.session.matchSegments == 2 
@@ -646,7 +835,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                             : 'Q${appState.session.currentPeriod}',
                                           style: TextStyle(
                                             color: Colors.white,
-                                            fontSize: 14, // Increased font size
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold, // Make text bolder
                                           ),
                                         ),
                                       ),
@@ -1130,7 +1320,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         TextButton(
                                           child: Text('Exit'),
                                           onPressed: () {
+                                            // Clear current session by resetting AppState
+                                            Provider.of<AppState>(context, listen: false).clearCurrentSession();
+                                                
+                                            // Pop the alert dialog
                                             Navigator.of(context).pop();
+                                            
+                                            // Use pushReplacementNamed to navigate back to the session prompt screen
                                             Navigator.of(context).pushReplacementNamed('/');
                                           },
                                         ),

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import '../database.dart';
 import '../models/session.dart';
 import '../models/player.dart';
+import '../hive_database.dart';
+import 'dart:convert';
 
 class AppState with ChangeNotifier {
   bool _isDarkTheme = true;
@@ -10,78 +11,170 @@ class AppState with ChangeNotifier {
   List<Map<String, dynamic>> _sessions = [];
   String? _currentSessionPassword;
   Session _session = Session();
+  bool _isReadOnlyMode = false;
 
   int? get currentSessionId => _currentSessionId;
   List<Map<String, dynamic>> get players => _players;
   List<Map<String, dynamic>> get sessions => _sessions;
   String? get currentSessionPassword => _currentSessionPassword;
   Session get session => _session;
+  bool get isDarkTheme => _isDarkTheme;
+  bool get isReadOnlyMode => _isReadOnlyMode;
 
   set session(Session newSession) {
     _session = newSession;
     notifyListeners();
   }
 
-  Future<void> loadSession(int sessionId) async {
-    _currentSessionId = sessionId;
-    _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
-    _players.sort((a, b) => a['name'].compareTo(b['name']));
-    
-    // Get session info to get the name
-    final allSessions = await SessionDatabase.instance.getAllSessions();
-    final sessionInfo = allSessions.firstWhere((s) => s['id'] == sessionId, orElse: () => {'name': ''});
-    final sessionName = sessionInfo['name'] ?? '';
-    _currentSessionPassword = sessionName;
-    
-    // Initialize session with default values
-    _session = Session(sessionName: sessionName);
-    
-    // Load session settings if they exist
-    final settings = await SessionDatabase.instance.getSessionSettings(sessionId);
-    if (settings != null) {
-      _session = Session(
-        sessionName: sessionName,
-        enableMatchDuration: settings['enableMatchDuration'],
-        matchDuration: settings['matchDuration'],
-        matchSegments: settings['matchSegments'],
-        enableTargetDuration: settings['enableTargetDuration'],
-        targetPlayDuration: settings['targetPlayDuration'],
-        enableSound: settings['enableSound'],
-      );
+  Future<void> loadSessions() async {
+    try {
+      // Load sessions ONLY from Hive
+      final hiveSessions = await HiveSessionDatabase.instance.getAllSessions();
+      print('AppState: Loaded ${hiveSessions.length} sessions from Hive database');
+      _sessions = hiveSessions;
+      notifyListeners();
+    } catch (e) {
+      print('AppState: Error loading sessions from Hive: $e');
+      // If error occurs, provide empty sessions list
+      _sessions = [];
+      notifyListeners();
     }
-    
-    // Initialize players from database
-    for (var player in _players) {
-      _session.addPlayer(player['name']);
-      _session.updatePlayerTime(player['name'], player['timer_seconds'] ?? 0);
-    }
-    
-    notifyListeners();
   }
 
   Future<void> createSession(String name) async {
-    _currentSessionId = await SessionDatabase.instance.insertSession(name);
-    _currentSessionPassword = name;
-    _players = [];
-    _session = Session(sessionName: name);
-    notifyListeners();
+    try {
+      // Ensure name is not empty
+      final sessionName = name.trim().isEmpty ? "New Session" : name.trim();
+      print('AppState: Creating new session with name: "$sessionName"');
+      
+      // Store ONLY in Hive
+      final sessionId = await HiveSessionDatabase.instance.insertSession(sessionName);
+      print('AppState: Created new session with ID $sessionId in Hive');
+      
+      // Load sessions to make sure the new session is in the list
+      await loadSessions();
+      
+      // Explicitly verify the session before loading
+      final allSessions = await HiveSessionDatabase.instance.getAllSessions();
+      final sessionInfo = allSessions.firstWhere(
+        (s) => s['id'] == sessionId, 
+        orElse: () => {'name': sessionName, 'id': sessionId}
+      );
+      
+      print('AppState: Verified session name before loading: "${sessionInfo['name']}"');
+      
+      // Now load the session with the verified session ID
+      await loadSession(sessionId);
+      
+      // Double-check the session name was set correctly
+      print('AppState: After loadSession, session name is: "${_session.sessionName}"');
+      print('AppState: After loadSession, currentSessionPassword is: "$_currentSessionPassword"');
+    } catch (e) {
+      print('AppState: Error creating session in Hive: $e');
+      throw Exception('Could not create session: $e');
+    }
+  }
+
+  Future<void> loadSession(int sessionId) async {
+    print('AppState.loadSession called with sessionId: $sessionId');
+    
+    if (sessionId <= 0) {
+      print('Invalid session ID: $sessionId');
+      throw Exception('Invalid session ID');
+    }
+    
+    try {
+      // CRITICAL STEP: First, get the exact session name from the database
+      // This will ensure we have the correct name regardless of which database is used
+      final sessionData = await HiveSessionDatabase.instance.getSession(sessionId);
+      if (sessionData == null) {
+        print('Session not found in database: $sessionId');
+        throw Exception('Session not found');
+      }
+      
+      final correctSessionName = sessionData['name'] ?? '';
+      print('Found session name from direct lookup: "$correctSessionName"');
+      
+      // Now set the current session ID and load players
+      _currentSessionId = sessionId;
+      _players = await HiveSessionDatabase.instance.getPlayersForSession(sessionId);
+      print('Loaded ${_players.length} players for session');
+      _players.sort((a, b) => a['name'].compareTo(b['name']));
+      
+      // CRITICAL: Set the current session password to the correct name
+      // This is the primary source of the name shown in the UI
+      _currentSessionPassword = correctSessionName;
+      print('Set currentSessionPassword to: "$_currentSessionPassword"');
+      
+      // Create the session with the correct name
+      _session = Session(sessionName: correctSessionName);
+      print('Created new Session with sessionName: "${_session.sessionName}"');
+      
+      // Load session settings if they exist
+      try {
+        final settings = await HiveSessionDatabase.instance.getSessionSettings(sessionId);
+        print('Session settings: ${settings != null ? 'Found' : 'Not found'}');
+        if (settings != null) {
+          // Create a new session with settings but preserve the correct name
+          _session = Session(
+            sessionName: correctSessionName,  // Make sure we keep the session name
+            enableMatchDuration: settings['enableMatchDuration'],
+            matchDuration: settings['matchDuration'],
+            matchSegments: settings['matchSegments'],
+            enableTargetDuration: settings['enableTargetDuration'],
+            targetPlayDuration: settings['targetPlayDuration'],
+            enableSound: settings['enableSound'],
+          );
+          print('Loaded session settings with name: "${_session.sessionName}"');
+        }
+      } catch (e) {
+        print('Error loading session settings, using defaults: $e');
+        // Continue with default settings if we can't load settings
+      }
+      
+      // Initialize players from database
+      try {
+        for (var player in _players) {
+          _session.addPlayer(player['name']);
+          _session.updatePlayerTime(player['name'], player['timer_seconds'] ?? 0);
+        }
+      } catch (e) {
+        print('Error initializing players: $e');
+        // Continue with the session even if player initialization fails
+      }
+      
+      print('Session loaded successfully, currentSessionId: $_currentSessionId');
+      print('Final session name in AppState: "${_session.sessionName}"');
+      print('Final currentSessionPassword: "$_currentSessionPassword"');
+      
+      _isReadOnlyMode = false;
+      notifyListeners();
+    } catch (e) {
+      print('Error during session load: $e');
+      _currentSessionId = null;
+      _currentSessionPassword = null;
+      _isReadOnlyMode = false;
+      throw e;  // Re-throw to allow proper error handling
+    }
   }
 
   Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
     if (_currentSessionId != null) {
-      await SessionDatabase.instance.updatePlayerTimer(playerId, timerSeconds);
-      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
+      try {
+        await HiveSessionDatabase.instance.updatePlayerTimer(playerId, timerSeconds);
+        _players = await HiveSessionDatabase.instance.getPlayersForSession(_currentSessionId!);
       
-      final playerIndex = _players.indexWhere((p) => p['id'] == playerId);
-      if (playerIndex != -1) {
-        final playerName = _players[playerIndex]['name'];
-        _session.updatePlayerTime(playerName, timerSeconds);
+        final playerIndex = _players.indexWhere((p) => p['id'] == playerId);
+        if (playerIndex != -1) {
+          final playerName = _players[playerIndex]['name'];
+          _session.updatePlayerTime(playerName, timerSeconds);
+        }
+      } catch (e) {
+        print('Error updating player timer in Hive: $e');
       }
     }
     notifyListeners();
   }
-
-  bool get isDarkTheme => _isDarkTheme;
 
   void toggleTheme() {
     _isDarkTheme = !_isDarkTheme;
@@ -99,8 +192,8 @@ class AppState with ChangeNotifier {
     _session.addPlayer(trimmedName);
     
     try {
-      // Add to database
-      final playerId = await SessionDatabase.instance.insertPlayer(_currentSessionId!, trimmedName, 0);
+      // Add to Hive database
+      final playerId = await HiveSessionDatabase.instance.insertPlayer(_currentSessionId!, trimmedName, 0);
       
       // Add locally if database succeeded
       Map<String, dynamic> newPlayer = {
@@ -133,7 +226,7 @@ class AppState with ChangeNotifier {
       // Save session changes
       await saveSession();
     } catch (e) {
-      print('Error adding player to database: $e');
+      print('Error adding player to Hive database: $e');
       // Continue with in-memory session even if database fails
     }
     
@@ -209,7 +302,11 @@ class AppState with ChangeNotifier {
         final playerId = _players[playerIndex]['id'];
         _players[playerIndex]['timer_seconds'] = player.totalTime;
         // We don't await here to improve UI responsiveness
-        SessionDatabase.instance.updatePlayerTimer(playerId, player.totalTime);
+        try {
+          HiveSessionDatabase.instance.updatePlayerTimer(playerId, player.totalTime);
+        } catch (e) {
+          print('Error updating player in Hive: $e');
+        }
       }
       
       notifyListeners();
@@ -219,79 +316,125 @@ class AppState with ChangeNotifier {
   Future<void> saveSession() async {
     if (_currentSessionId == null) return;
     
-    // Update player times in database
-    for (var playerName in _session.players.keys) {
-      final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
-      final playerTime = _session.players[playerName]!.totalTime;
-      
-      if (playerIndex != -1) {
-        final playerId = _players[playerIndex]['id'] as int;
-        await SessionDatabase.instance.updatePlayerTimer(playerId, playerTime);
+    try {
+      // Update player times in Hive database
+      for (var playerName in _session.players.keys) {
+        final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+        final playerTime = _session.players[playerName]!.totalTime;
         
-        // Update local list
-        _players[playerIndex]['timer_seconds'] = playerTime;
+        if (playerIndex != -1) {
+          final playerId = _players[playerIndex]['id'] as int;
+          await HiveSessionDatabase.instance.updatePlayerTimer(playerId, playerTime);
+          
+          // Update local list
+          _players[playerIndex]['timer_seconds'] = playerTime;
+        }
       }
+      
+      // Save session settings to Hive
+      await HiveSessionDatabase.instance.saveSessionSettings(_currentSessionId!, {
+        'enableMatchDuration': _session.enableMatchDuration,
+        'matchDuration': _session.matchDuration,
+        'matchSegments': _session.matchSegments,
+        'enableTargetDuration': _session.enableTargetDuration,
+        'targetPlayDuration': _session.targetPlayDuration,
+        'enableSound': _session.enableSound,
+      });
+    } catch (e) {
+      print('Error saving to Hive database: $e');
     }
-    
-    // Save session settings
-    await SessionDatabase.instance.saveSessionSettings(_currentSessionId!, {
-      'enableMatchDuration': _session.enableMatchDuration,
-      'matchDuration': _session.matchDuration,
-      'matchSegments': _session.matchSegments,
-      'enableTargetDuration': _session.enableTargetDuration,
-      'targetPlayDuration': _session.targetPlayDuration,
-      'enableSound': _session.enableSound,
-    });
     
     // No need to notify listeners here as the caller should do it if needed
   }
 
-  Future<void> loadSessions() async {
-    _sessions = await SessionDatabase.instance.getAllSessions();
+  Future<void> setCurrentSession(int sessionId) async {
+    try {
+      _currentSessionId = sessionId;
+      
+      _players = await HiveSessionDatabase.instance.getPlayersForSession(sessionId);
+      _players.sort((a, b) => a['name'].compareTo(b['name']));
+      
+      // Get session directly from database to ensure we have the correct name
+      final sessionData = await HiveSessionDatabase.instance.getSession(sessionId);
+      if (sessionData == null) {
+        print('Session not found: $sessionId');
+        throw Exception('Session not found');
+      }
+      
+      final sessionName = sessionData['name'] ?? '';
+      print('Loaded session name: "$sessionName"');
+      _currentSessionPassword = sessionName;
+      
+      // Initialize session with correct name
+      _session = Session(
+        sessionName: sessionName,
+        enableMatchDuration: false,
+        matchDuration: 90,
+        matchSegments: 2,
+        enableTargetDuration: false,
+        targetPlayDuration: 20,
+        enableSound: true,
+      );
+      
+      // Load session settings from Hive
+      final settings = await HiveSessionDatabase.instance.getSessionSettings(sessionId);
+      if (settings != null) {
+        _session = Session(
+          sessionName: sessionName, // Make sure we preserve the correct name
+          enableMatchDuration: settings['enableMatchDuration'],
+          matchDuration: settings['matchDuration'],
+          matchSegments: settings['matchSegments'],
+          enableTargetDuration: settings['enableTargetDuration'],
+          targetPlayDuration: settings['targetPlayDuration'],
+          enableSound: settings['enableSound'],
+        );
+      }
+      
+      // Initialize players
+      for (var player in _players) {
+        final name = player['name'];
+        final timerSeconds = player['timer_seconds'];
+        _session.players[name] = Player(name: name, totalTime: timerSeconds);
+      }
+      
+      print('Session loaded with name: "${_session.sessionName}", ID: $sessionId');
+    } catch (e) {
+      print('Error loading session from Hive: $e');
+      throw Exception('Error loading session: $e');
+    }
+    
     notifyListeners();
   }
 
-  Future<void> setCurrentSession(int sessionId) async {
-    _currentSessionId = sessionId;
-    _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
-    _players.sort((a, b) => a['name'].compareTo(b['name']));
+  Future<void> resetAllPlayers() async {
+    // Reset player states in the session model
+    _session.resetAllPlayers();
     
-    // Get session info for the name
-    final allSessions = await SessionDatabase.instance.getAllSessions();
-    final sessionInfo = allSessions.firstWhere((s) => s['id'] == sessionId, orElse: () => {'name': ''});
-    final sessionName = sessionInfo['name'] ?? '';
-    _currentSessionPassword = sessionName;
-    
-    // Initialize an empty session
-    _session = Session(
-      sessionName: sessionName,
-      enableMatchDuration: false,
-      matchDuration: 90,
-      matchSegments: 2,
-      enableTargetDuration: false,
-      targetPlayDuration: 20,
-      enableSound: true,
-    );
-    
-    // Load session settings if they exist
-    final settings = await SessionDatabase.instance.getSessionSettings(sessionId);
-    if (settings != null) {
-      _session = Session(
-        sessionName: sessionName,
-        enableMatchDuration: settings['enableMatchDuration'],
-        matchDuration: settings['matchDuration'],
-        matchSegments: settings['matchSegments'],
-        enableTargetDuration: settings['enableTargetDuration'],
-        targetPlayDuration: settings['targetPlayDuration'],
-        enableSound: settings['enableSound'],
-      );
+    // If in read-only mode, just update the UI without trying to persist changes
+    if (_isReadOnlyMode) {
+      print('In read-only mode, resetting all players without persisting to database');
+      notifyListeners();
+      return;
     }
     
-    // Initialize players
-    for (var player in _players) {
-      final name = player['name'];
-      final timerSeconds = player['timer_seconds'];
-      _session.players[name] = Player(name: name, totalTime: timerSeconds);
+    // If we're not in read-only mode, try to update the database
+    try {
+      // Update all player timers in Hive database
+      if (_currentSessionId != null) {
+        for (final entry in _session.players.entries) {
+          // Find player ID from the players list
+          final playerIndex = _players.indexWhere((p) => p['name'] == entry.key);
+          if (playerIndex != -1) {
+            final playerId = _players[playerIndex]['id'] as int;
+            await HiveSessionDatabase.instance.updatePlayerTimer(playerId, entry.value.time);
+            
+            // Update local list
+            _players[playerIndex]['timer_seconds'] = 0;
+          }
+        }
+      }
+    } catch (e) {
+      print('Error resetting players in Hive: $e');
     }
     
     notifyListeners();
@@ -304,27 +447,32 @@ class AppState with ChangeNotifier {
     _session.hasWhistlePlayed = false;
     _session.matchRunning = false;
     
-    // Reset all player timers
-    for (var playerName in _session.players.keys) {
-      final player = _session.players[playerName]!;
-      // Reset all time fields to prevent any calculation issues
-      player.totalTime = 0;
-      player.time = 0;
-      player.active = false;
-      player.startTime = 0;
-      
-      // Update player in database
-      final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
-      if (playerIndex != -1 && _currentSessionId != null) {
-        final playerId = _players[playerIndex]['id'];
-        await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
-        // Update local list
-        _players[playerIndex]['timer_seconds'] = 0;
+    try {
+      // Reset all player timers and update in Hive
+      for (var playerName in _session.players.keys) {
+        final player = _session.players[playerName]!;
+        // Reset all time fields to prevent any calculation issues
+        player.totalTime = 0;
+        player.time = 0;
+        player.active = false;
+        player.startTime = 0;
+        
+        // Update player in Hive database
+        final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+        if (playerIndex != -1 && _currentSessionId != null) {
+          final playerId = _players[playerIndex]['id'];
+          await HiveSessionDatabase.instance.updatePlayerTimer(playerId, 0);
+          // Update local list
+          _players[playerIndex]['timer_seconds'] = 0;
+        }
       }
+      
+      // Save changes to Hive database
+      await saveSession();
+    } catch (e) {
+      print('Error resetting session in Hive: $e');
     }
     
-    // Save changes to database
-    await saveSession();
     notifyListeners();
   }
 
@@ -441,7 +589,7 @@ class AppState with ChangeNotifier {
         if (playerIndex != -1) {
           // Use the player's ID to update the timer
           final playerId = _players[playerIndex]['id'] as int;
-          await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
+          await HiveSessionDatabase.instance.updatePlayerTimer(playerId, 0);
           
           // Update local list
           _players[playerIndex]['timer_seconds'] = 0;
@@ -472,6 +620,90 @@ class AppState with ChangeNotifier {
       }
       
       notifyListeners();
+    }
+  }
+
+  void clearCurrentSession() {
+    _currentSessionId = null;
+    _currentSessionPassword = null;
+    _players = [];
+    _session = Session(); // Reset to a new blank session
+    notifyListeners();
+  }
+
+  Future<void> togglePlayerActive(String name) async {
+    // Toggle the player's active state in the session model
+    _session.togglePlayerActive(name);
+    
+    // If in read-only mode, just update the UI without trying to persist changes
+    if (_isReadOnlyMode) {
+      print('In read-only mode, toggling player $name without persisting to database');
+      notifyListeners();
+      return;
+    }
+    
+    // If we're not in read-only mode, try to update the database
+    try {
+      // Update player timer in Hive database
+      if (_currentSessionId != null) {
+        final player = _session.players[name];
+        if (player != null) {
+          // Find player ID from the players list
+          final playerIndex = _players.indexWhere((p) => p['name'] == name);
+          if (playerIndex != -1) {
+            final playerId = _players[playerIndex]['id'] as int;
+            await HiveSessionDatabase.instance.updatePlayerTimer(playerId, player.time);
+          }
+        }
+      }
+    } catch (e) {
+      print('Error updating player active state in Hive: $e');
+    }
+    
+    notifyListeners();
+  }
+
+  Future<void> resetSessionState() async {
+    // Reset the session state
+    _session.resetSessionState();
+    
+    // If in read-only mode, just update the UI without trying to persist changes
+    if (_isReadOnlyMode) {
+      print('In read-only mode, resetting session state without persisting to database');
+      notifyListeners();
+      return;
+    }
+    
+    // If we're not in read-only mode, try to update the database
+    try {
+      // No need to update the database for session state reset
+      // as it only affects runtime state
+    } catch (e) {
+      print('Error resetting session state: $e');
+    }
+    
+    notifyListeners();
+  }
+
+  Future<void> deleteSession(int sessionId) async {
+    try {
+      // Delete from Hive
+      await HiveSessionDatabase.instance.deleteSession(sessionId);
+      
+      // Reload the sessions list
+      await loadSessions();
+      
+      // If the current session was deleted, clear it
+      if (_currentSessionId == sessionId) {
+        _currentSessionId = null;
+        _currentSessionPassword = null;
+        _session = Session();
+        _players = [];
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Error deleting session from Hive: $e');
+      throw Exception('Could not delete session: $e');
     }
   }
 }

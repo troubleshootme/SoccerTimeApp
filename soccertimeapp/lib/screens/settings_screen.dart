@@ -94,46 +94,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SizedBox(height: 8),
               
               // Match Segments - only visible when match duration is enabled
-              _enableMatchDuration ? Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Match Segments",
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                      fontSize: 16,
-                    ),
+              _enableMatchDuration ? _buildSettingRow(
+                "Match Segments",
+                Container(), // No toggle for segments
+                DropdownButton<String>(
+                  value: _matchSegments,
+                  dropdownColor: isDark ? Colors.grey[850] : Colors.white,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black,
                   ),
-                  DropdownButton<String>(
-                    value: _matchSegments,
-                    dropdownColor: isDark ? Colors.grey[850] : Colors.white,
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                    underline: Container(
-                      height: 1,
-                      color: isDark ? Colors.white30 : Colors.black26,
-                    ),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          _matchSegments = newValue;
-                        });
-                      }
-                    },
-                    items: <String>['Halves', 'Quarters']
-                        .map<DropdownMenuItem<String>>((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
+                  icon: Icon(
+                    Icons.arrow_drop_down,
+                    color: isDark ? Colors.white : Colors.black,
                   ),
-                ],
+                  underline: Container(
+                    height: 1,
+                    color: isDark ? Colors.white30 : Colors.black26,
+                  ),
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      setState(() {
+                        _matchSegments = newValue;
+                      });
+                    }
+                  },
+                  items: <String>['Halves', 'Quarters']
+                      .map<DropdownMenuItem<String>>((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                ),
               ) : Container(),
               Divider(color: isDark ? Colors.white24 : Colors.black12),
               
@@ -177,72 +169,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SizedBox(height: 8),
               
               // Theme
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Theme",
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                      fontSize: 16,
-                    ),
-                  ),
-                  DropdownButton<String>(
-                    value: _theme,
-                    dropdownColor: isDark ? Colors.grey[850] : Colors.white,
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                    icon: Icon(
-                      Icons.arrow_drop_down,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                    underline: Container(
-                      height: 1,
-                      color: isDark ? Colors.white30 : Colors.black26,
-                    ),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setState(() {
-                          _theme = newValue;
-                          Provider.of<AppState>(context, listen: false).toggleTheme();
-                        });
+              _buildSettingRow(
+                "Dark Mode",
+                Switch(
+                  value: Provider.of<AppState>(context).isDarkTheme,
+                  activeColor: Colors.deepPurple,
+                  activeTrackColor: Colors.deepPurple.withOpacity(0.5),
+                  onChanged: (value) {
+                    setState(() {
+                      // If current theme doesn't match desired value, toggle it
+                      if (Provider.of<AppState>(context, listen: false).isDarkTheme != value) {
+                        Provider.of<AppState>(context, listen: false).toggleTheme();
                       }
-                    },
-                    items: <String>['Dark', 'Light']
-                        .map<DropdownMenuItem<String>>((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                  ),
-                ],
+                    });
+                  },
+                ),
+                Container(), // No input field for theme
               ),
               Divider(color: isDark ? Colors.white24 : Colors.black12),
               
               // Sound
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Sound",
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                      fontSize: 16,
-                    ),
-                  ),
-                  Switch(
-                    value: _enableSound,
-                    activeColor: Colors.grey,
-                    activeTrackColor: Colors.grey.withOpacity(0.5),
-                    onChanged: (value) {
-                      setState(() {
-                        _enableSound = value;
-                      });
-                    },
-                  ),
-                ],
+              _buildSettingRow(
+                "Sound",
+                Switch(
+                  value: _enableSound,
+                  activeColor: Colors.deepPurple,
+                  activeTrackColor: Colors.deepPurple.withOpacity(0.5),
+                  onChanged: (value) {
+                    setState(() {
+                      _enableSound = value;
+                    });
+                  },
+                ),
+                Container(), // No input field for sound
               ),
               Divider(color: isDark ? Colors.white24 : Colors.black12),
               
@@ -285,62 +244,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 },
                 isDark ? Colors.indigo[700]! : Colors.indigo,
-              ),
-              
-              SizedBox(height: 12),
-              _buildActionButton(
-                "Backup Session",
-                () {
-                  // Backup logic using FileService
-                  final appState = Provider.of<AppState>(context, listen: false);
-                  if (appState.currentSessionPassword != null) {
-                    FileService().backupSession(
-                      appState.session, 
-                      appState.currentSessionPassword!
-                    ).then((_) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Session backed up successfully")),
-                      );
-                    }).catchError((error) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Error backing up session: $error")),
-                      );
-                    });
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("No active session to back up")),
-                    );
-                  }
-                },
-                isDark ? Colors.teal[700]! : Colors.teal,
-              ),
-              
-              SizedBox(height: 12),
-              _buildActionButton(
-                "Restore Session",
-                () {
-                  // Restore logic using FileService
-                  final appState = Provider.of<AppState>(context, listen: false);
-                  FileService().restoreSession().then((session) {
-                    if (session != null) {
-                      // Set the restored session
-                      appState.session = session;
-                      appState.saveSession();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Session restored successfully")),
-                      );
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("No session file selected or invalid file")),
-                      );
-                    }
-                  }).catchError((error) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("Error restoring session: $error")),
-                    );
-                  });
-                },
-                isDark ? Colors.amber[900]! : Colors.amber[700]!,
               ),
               
               SizedBox(height: 24),

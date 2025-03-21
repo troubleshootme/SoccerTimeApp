@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:io' show Platform;
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'screens/session_prompt_screen.dart';
@@ -8,13 +8,51 @@ import 'providers/app_state.dart';
 import 'screens/main_screen.dart';
 import 'screens/settings_screen.dart';
 import 'utils/app_themes.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+import 'hive_database.dart';
+import 'dart:async';
 
 // Single global instance for error tracking
 final _errorHandler = ErrorHandler();
 
 Future<void> main() async {
-  // This needs to be the very first line to catch early errors
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Set preferred orientation to portrait
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  
+  // Configure status bar color
+  SystemChrome.setSystemUIOverlayStyle(
+    SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.black,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
+  
+  // Initialize directory for databases and files
+  try {
+    if (!kIsWeb) {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      await Directory('${appDocDir.path}/sessions').create(recursive: true);
+    }
+  } catch (e) {
+    print('Error creating app directory: $e');
+  }
+  
+  // Initialize Hive database
+  try {
+    await HiveSessionDatabase.instance.init();
+    print('Hive database initialized successfully');
+  } catch (e) {
+    print('Error initializing database: $e');
+  }
   
   // Set up global error handlers first
   FlutterError.onError = _errorHandler.handleFlutterError;
@@ -25,8 +63,6 @@ Future<void> main() async {
     // Configure UI mode
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, 
       overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom]);
-    
-    // Remove hardware acceleration configuration since it's handled in AndroidManifest.xml
   }
   
   // Run the app
@@ -144,27 +180,77 @@ class _ErrorBoundaryWidgetState extends State<ErrorBoundaryWidget> {
   }
 }
 
-class SoccerTimeApp extends StatelessWidget {
-  // Don't use const constructor to avoid widget identity issues
-  SoccerTimeApp({Key? key}) : super(key: key);
-  
+class SoccerTimeApp extends StatefulWidget {
+  @override
+  _SoccerTimeAppState createState() => _SoccerTimeAppState();
+}
+
+class _SoccerTimeAppState extends State<SoccerTimeApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Close Hive database when app is disposed
+    HiveSessionDatabase.instance.close();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // App is in background, close database to prevent locking
+      HiveSessionDatabase.instance.close();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final appState = Provider.of<AppState>(context);
-    final isDarkTheme = appState.isDarkTheme;
-    
-    return MaterialApp(
-      title: 'SoccerTimeApp',
-      theme: AppThemes.lightTheme(),
-      darkTheme: AppThemes.darkTheme(),
-      themeMode: isDarkTheme ? ThemeMode.dark : ThemeMode.light,
-      home: appState.currentSessionId == null
-          ? SessionPromptScreen()
-          : MainScreen(),
-      routes: {
-        // Do not include '/' route when home is specified
-        '/settings': (context) => SettingsScreen(),
-      },
+    return ChangeNotifierProvider(
+      create: (context) => AppState(),
+      child: Consumer<AppState>(
+        builder: (context, appState, child) {
+          return MaterialApp(
+            title: 'Soccer Time App',
+            theme: ThemeData(
+              brightness: appState.isDarkTheme ? Brightness.dark : Brightness.light,
+              primarySwatch: Colors.blue,
+              scaffoldBackgroundColor: appState.isDarkTheme 
+                ? AppThemes.darkBackground 
+                : AppThemes.lightBackground,
+              appBarTheme: AppBarTheme(
+                backgroundColor: appState.isDarkTheme 
+                  ? AppThemes.darkBackground 
+                  : AppThemes.lightBackground,
+                iconTheme: IconThemeData(
+                  color: appState.isDarkTheme 
+                    ? AppThemes.darkText 
+                    : AppThemes.lightText,
+                ),
+                titleTextStyle: TextStyle(
+                  color: appState.isDarkTheme 
+                    ? AppThemes.darkText 
+                    : AppThemes.lightText,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            // Define routes directly using the route constructors for better type checking
+            initialRoute: '/',
+            routes: {
+              '/': (context) => SessionPromptScreen(),
+              '/main': (context) => MainScreen(),
+              '/settings': (context) => SettingsScreen(),
+            },
+            debugShowCheckedModeBanner: false,
+          );
+        },
+      ),
     );
   }
 }

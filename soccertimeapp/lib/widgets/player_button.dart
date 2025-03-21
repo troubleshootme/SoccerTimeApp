@@ -64,7 +64,7 @@ class PlayerButton extends StatelessWidget {
       },
       child: Container(
         margin: EdgeInsets.only(bottom: kIsWeb ? 6 : 12),
-        padding: EdgeInsets.all(8), // Smaller padding to fit progress bar
+        padding: EdgeInsets.all(8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(25),
           gradient: LinearGradient(
@@ -90,7 +90,7 @@ class PlayerButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
+        child: Stack(
           children: [
             // Player content
             Padding(
@@ -132,15 +132,17 @@ class PlayerButton extends StatelessWidget {
               ),
             ),
             
-            // Progress bar
+            // Progress bar as overlay at bottom of button
             if (enableTargetDuration)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              Positioned(
+                left: 10, 
+                right: 10,
+                bottom: 6,
                 child: Container(
-                  height: 10,
+                  height: 6, // Made slightly smaller
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     color: Colors.black38,
                   ),
                   child: Row(
@@ -150,7 +152,7 @@ class PlayerButton extends StatelessWidget {
                         curve: Curves.easeOut,
                         width: (progress / 100) * (MediaQuery.of(context).size.width - 70), // Adjust based on screen width
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(8),
                           gradient: LinearGradient(
                             colors: isGoalReached 
                                 ? [Colors.yellow.shade600, Colors.amber]
