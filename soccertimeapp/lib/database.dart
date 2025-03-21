@@ -3,13 +3,15 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Directory;
 import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
   static Database? _database;
   static SharedPreferences? _prefs;
+  static bool _hasTriedFallback = false;
 
   SessionDatabase._init() {
     if (!kIsWeb) {
@@ -25,8 +27,28 @@ class SessionDatabase {
       throw UnsupportedError('SQLite not supported on web');
     }
     if (_database != null) return _database!;
-    _database = await _initDB('sessions.db');
-    return _database!;
+    
+    try {
+      _database = await _initDB('sessions.db');
+      // Test if we can write to the database
+      await _database!.execute('PRAGMA user_version = 1');
+      return _database!;
+    } catch (e) {
+      print('Database access error: $e');
+      if (!_hasTriedFallback) {
+        _hasTriedFallback = true;
+        _database = null; // Reset database to try fallback
+        return await database; // Retry with fallback path
+      }
+      // If fallback fails, use a temporary in-memory database
+      print('Using in-memory database as fallback');
+      _database = await openDatabase(
+        inMemoryDatabasePath,
+        version: 1,
+        onCreate: _createDB
+      );
+      return _database!;
+    }
   }
 
   Future<SharedPreferences> get prefs async {
@@ -35,9 +57,50 @@ class SessionDatabase {
   }
 
   Future<Database> _initDB(String filePath) async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    try {
+      // First try app documents directory
+      final documentsDirectory = await getApplicationDocumentsDirectory();
+      await Directory(documentsDirectory.path).create(recursive: true);
+      final path = join(documentsDirectory.path, filePath);
+      print('Using database path: $path');
+      
+      return await openDatabase(
+        path, 
+        version: 1, 
+        onCreate: _createDB,
+        singleInstance: true,
+        readOnly: false
+      );
+    } catch (e) {
+      print('Error accessing app documents directory: $e');
+      
+      // If app documents fail, try databases directory
+      try {
+        final dbPath = await getDatabasesPath();
+        await Directory(dbPath).create(recursive: true);
+        final path = join(dbPath, filePath);
+        print('Using alternative database path: $path');
+        
+        return await openDatabase(
+          path, 
+          version: 1, 
+          onCreate: _createDB,
+          singleInstance: true,
+          readOnly: false
+        );
+      } catch (e) {
+        print('Error accessing databases directory: $e');
+        // If all fails, use in-memory database
+        if (!_hasTriedFallback) {
+          throw e; // Let the caller handle this to try a fallback
+        }
+        return await openDatabase(
+          inMemoryDatabasePath,
+          version: 1,
+          onCreate: _createDB
+        );
+      }
+    }
   }
 
   Future _createDB(Database db, int version) async {

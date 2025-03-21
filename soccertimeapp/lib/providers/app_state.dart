@@ -88,17 +88,56 @@ class AppState with ChangeNotifier {
     notifyListeners();
   }
 
-  void addPlayer(String name) async {
-    if (_currentSessionId != null) {
-      await SessionDatabase.instance.insertPlayer(_currentSessionId!, name, 0);
-      _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
-      _players.sort((a, b) => a['name'].compareTo(b['name']));
+  Future<void> addPlayer(String name) async {
+    if (_currentSessionId == null || name.trim().isEmpty) return;
+    final trimmedName = name.trim();
+    
+    // Check if player already exists
+    if (_session.players.containsKey(trimmedName)) return;
+    
+    // Add to session
+    _session.addPlayer(trimmedName);
+    
+    try {
+      // Add to database
+      final playerId = await SessionDatabase.instance.insertPlayer(_currentSessionId!, trimmedName, 0);
       
-      _session.addPlayer(name);
-    } else {
-      _players.add({'name': name, 'timer_seconds': 0});
-      _session.addPlayer(name);
+      // Add locally if database succeeded
+      Map<String, dynamic> newPlayer = {
+        'id': playerId,
+        'name': trimmedName,
+        'timer_seconds': 0,
+        'session_id': _currentSessionId!,
+      };
+      
+      try {
+        // Safely add to the players list
+        if (_players is List) {
+          // Handle immutable lists by creating a new one
+          List<Map<String, dynamic>> newList = List<Map<String, dynamic>>.from(_players);
+          newList.add(newPlayer);
+          _players = newList;
+        } else {
+          // Direct add if possible
+          _players.add(newPlayer);
+        }
+        
+        // Sort alphabetically
+        _players.sort((a, b) => a['name'].compareTo(b['name']));
+      } catch (e) {
+        print('Error adding player to UI list: $e');
+        // Create a new player list if the current one is problematic
+        _players = [newPlayer];
+      }
+      
+      // Save session changes
+      await saveSession();
+    } catch (e) {
+      print('Error adding player to database: $e');
+      // Continue with in-memory session even if database fails
     }
+    
+    // Notify listeners to update UI
     notifyListeners();
   }
   
@@ -138,29 +177,69 @@ class AppState with ChangeNotifier {
     notifyListeners();
   }
   
-  Future<void> saveSession() async {
-    if (_currentSessionId != null) {
-      // Update all player times in the database
-      for (var player in _players) {
-        final name = player['name'];
-        if (_session.players.containsKey(name)) {
-          final totalTime = _session.players[name]!.totalTime;
-          await SessionDatabase.instance.updatePlayerTimer(player['id'], totalTime);
+  Future<void> togglePlayer(String playerName) async {
+    if (_session.players.containsKey(playerName)) {
+      final player = _session.players[playerName]!;
+      
+      // Calculate time before toggling
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      
+      if (player.active) {
+        // Player is active, deactivate them
+        if (player.startTime > 0) {
+          // Update total time
+          int elapsed = now - player.startTime;
+          player.totalTime += elapsed;
+          player.time = player.totalTime;
         }
+        player.active = false;
+        player.startTime = 0;
+      } else {
+        // Player is inactive, activate them
+        player.active = true;
+        player.startTime = now;
       }
       
-      // Save session settings to the database
-      await SessionDatabase.instance.saveSessionSettings(_currentSessionId!, {
-        'enableMatchDuration': _session.enableMatchDuration,
-        'matchDuration': _session.matchDuration,
-        'matchSegments': _session.matchSegments,
-        'enableTargetDuration': _session.enableTargetDuration,
-        'targetPlayDuration': _session.targetPlayDuration,
-        'enableSound': _session.enableSound,
-      });
+      // Update player in database if needed
+      final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+      if (playerIndex != -1 && _currentSessionId != null) {
+        final playerId = _players[playerIndex]['id'];
+        // We don't await here to improve UI responsiveness
+        SessionDatabase.instance.updatePlayerTimer(playerId, player.totalTime);
+      }
+      
+      notifyListeners();
+    }
+  }
+  
+  Future<void> saveSession() async {
+    if (_currentSessionId == null) return;
+    
+    // Update player times in database
+    for (var playerName in _session.players.keys) {
+      final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+      final playerTime = _session.players[playerName]!.totalTime;
+      
+      if (playerIndex != -1) {
+        final playerId = _players[playerIndex]['id'] as int;
+        await SessionDatabase.instance.updatePlayerTimer(playerId, playerTime);
+        
+        // Update local list
+        _players[playerIndex]['timer_seconds'] = playerTime;
+      }
     }
     
-    notifyListeners();
+    // Save session settings
+    await SessionDatabase.instance.saveSessionSettings(_currentSessionId!, {
+      'enableMatchDuration': _session.enableMatchDuration,
+      'matchDuration': _session.matchDuration,
+      'matchSegments': _session.matchSegments,
+      'enableTargetDuration': _session.enableTargetDuration,
+      'targetPlayDuration': _session.targetPlayDuration,
+      'enableSound': _session.enableSound,
+    });
+    
+    // No need to notify listeners here as the caller should do it if needed
   }
 
   Future<void> loadSessions() async {
@@ -214,128 +293,45 @@ class AppState with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> togglePlayer(String name) async {
-    if (_session.players.containsKey(name)) {
-      final player = _session.players[name]!;
-      player.active = !player.active;
-      
-      if (player.active) {
-        player.startTime = DateTime.now().millisecondsSinceEpoch;
-      } else {
-        // Calculate the time spent active
-        final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000;
-        player.totalTime += timeElapsed;
-        
-        // Save the updated time
-        final playerIndex = _players.indexWhere((p) => p['name'] == name);
-        if (playerIndex != -1 && _currentSessionId != null) {
-          await updatePlayerTimer(_players[playerIndex]['id'], player.totalTime);
-        }
-      }
-      
-      notifyListeners();
-    }
-  }
-  
-  Future<void> resetPlayerTime(String playerName) async {
-    if (_currentSessionId == null) return;
-    if (_session.players.containsKey(playerName)) {
-      // Reset the player's time
-      _session.players[playerName]!.totalTime = 0;
-      _session.players[playerName]!.time = 0;
-      
-      // Ensure the player is not active but can be activated again
-      if (_session.players[playerName]!.active) {
-        _session.players[playerName]!.active = false;
-        _session.players[playerName]!.startTime = 0;
-      }
-      
-      // Update in database
-      if (_currentSessionId != null) {
-        // Find player in _players list
-        final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
-        if (playerIndex != -1) {
-          // Use the player's ID to update the timer
-          final playerId = _players[playerIndex]['id'] as int;
-          await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
-          
-          // Update local list
-          _players[playerIndex]['timer_seconds'] = 0;
-        }
-      }
-      
-      saveSession();
-      notifyListeners();
-    }
-  }
-  
-  Future<void> removePlayer(String name) async {
-    if (_session.players.containsKey(name)) {
-      // Remove from session
-      _session.players.remove(name);
-      
-      // Remove from DB if needed
-      if (_currentSessionId != null) {
-        final playerIndex = _players.indexWhere((p) => p['name'] == name);
-        if (playerIndex != -1) {
-          final playerId = _players[playerIndex]['id'];
-          // Ideally we'd have a deletePlayer method in the database class
-          // For now, we'll just remove from our local list
-          _players.removeAt(playerIndex);
-        }
-      } else {
-        _players.removeWhere((p) => p['name'] == name);
-      }
-      
-      notifyListeners();
-    }
-  }
-  
   Future<void> resetSession() async {
-    // Reset match time
+    // Reset match time and player timers
     _session.matchTime = 0;
-    _session.matchStartTime = 0;
+    _session.currentPeriod = 1;
+    _session.hasWhistlePlayed = false;
     _session.matchRunning = false;
-    _session.isPaused = false;
     
-    // Reset all players
+    // Reset all player timers
     for (var playerName in _session.players.keys) {
-      await resetPlayerTime(playerName);
+      final player = _session.players[playerName]!;
+      player.totalTime = 0;
+      player.time = 0;
+      player.active = false;
+      player.startTime = 0;
+      
+      // Update player in database
+      final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+      if (playerIndex != -1 && _currentSessionId != null) {
+        final playerId = _players[playerIndex]['id'];
+        await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
+        // Update local list
+        _players[playerIndex]['timer_seconds'] = 0;
+      }
     }
     
+    // Save changes to database
     await saveSession();
     notifyListeners();
   }
 
   void startNextPeriod() {
-    // Move to next period
+    // Increment period
     _session.currentPeriod++;
+    // Reset the whistle flag
+    _session.hasWhistlePlayed = false;
+    // Unpause session
+    _session.isPaused = false;
     
-    // Get active players from before the pause
-    List<String> activePlayers = List.from(_session.activeBeforePause);
-    
-    // Set match running if we still have periods left
-    if (_session.currentPeriod <= _session.matchSegments) {
-      _session.matchRunning = true;
-      _session.isPaused = false;
-      
-      // Reactivate players that were active before period ended
-      for (var playerName in activePlayers) {
-        // Check if player exists and is not already active
-        if (_session.players.containsKey(playerName) && !_session.players[playerName]!.active) {
-          _session.players[playerName]!.active = true;
-          _session.players[playerName]!.startTime = DateTime.now().millisecondsSinceEpoch;
-        }
-      }
-      
-      // Clear the activeBeforePause list
-      _session.activeBeforePause.clear();
-    } else {
-      // Match is over
-      _session.matchRunning = false;
-    }
-    
-    saveSession();
+    // Notify listeners to update UI
     notifyListeners();
   }
   
@@ -370,24 +366,15 @@ class AppState with ChangeNotifier {
 
   // Store active players and handle state changes for period transitions
   void storeActivePlayersForPeriodChange() {
-    // Store active players
     _session.activeBeforePause = [];
     for (var playerName in _session.players.keys) {
       if (_session.players[playerName]!.active) {
         _session.activeBeforePause.add(playerName);
         
-        // Deactivate player and update their time
-        final player = _session.players[playerName]!;
-        final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000;
-        player.totalTime += timeElapsed;
-        player.active = false;
+        // Deactivate the player
+        _session.players[playerName]!.active = false;
       }
     }
-    
-    // Update session state
-    _session.isPaused = true;
-    saveSession();
-    notifyListeners();
   }
 
   // Rename a player
@@ -439,6 +426,61 @@ class AppState with ChangeNotifier {
       }
       
       saveSession();
+      notifyListeners();
+    }
+  }
+
+  // Add missing resetPlayerTime method
+  Future<void> resetPlayerTime(String playerName) async {
+    if (_currentSessionId == null) return;
+    if (_session.players.containsKey(playerName)) {
+      // Reset the player's time
+      _session.players[playerName]!.totalTime = 0;
+      _session.players[playerName]!.time = 0;
+      
+      // Ensure the player is not active but can be activated again
+      if (_session.players[playerName]!.active) {
+        _session.players[playerName]!.active = false;
+        _session.players[playerName]!.startTime = 0;
+      }
+      
+      // Update in database
+      if (_currentSessionId != null) {
+        // Find player in _players list
+        final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+        if (playerIndex != -1) {
+          // Use the player's ID to update the timer
+          final playerId = _players[playerIndex]['id'] as int;
+          await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
+          
+          // Update local list
+          _players[playerIndex]['timer_seconds'] = 0;
+        }
+      }
+      
+      notifyListeners();
+    }
+  }
+  
+  // Add missing removePlayer method
+  Future<void> removePlayer(String name) async {
+    if (_session.players.containsKey(name)) {
+      // Remove from session
+      _session.players.remove(name);
+      
+      // Remove from DB if needed
+      if (_currentSessionId != null) {
+        final playerIndex = _players.indexWhere((p) => p['name'] == name);
+        if (playerIndex != -1) {
+          final playerId = _players[playerIndex]['id'];
+          // Ideally we'd have a deletePlayer method in the database class
+          // For now, we'll just remove from our local list
+          _players.removeAt(playerIndex);
+        }
+      } else {
+        _players.removeWhere((p) => p['name'] == name);
+      }
+      
       notifyListeners();
     }
   }
