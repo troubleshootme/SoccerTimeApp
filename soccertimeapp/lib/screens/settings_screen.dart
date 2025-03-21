@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../screens/match_log_screen.dart';
 import '../providers/app_state.dart';
 import '../services/file_service.dart';
+import '../utils/app_themes.dart';
 
 class SettingsScreen extends StatefulWidget {
   @override
@@ -10,196 +11,439 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _matchDurationController = TextEditingController();
-  final _targetDurationController = TextEditingController();
+  final _matchDurationController = TextEditingController(text: "90");
+  final _targetDurationController = TextEditingController(text: "16");
+  
+  bool _enableMatchDuration = true;
+  bool _enableTargetDuration = true;
+  bool _enableSound = false;
+  String _matchSegments = "Halves";
+  String _theme = "Dark";
 
   @override
   void initState() {
     super.initState();
-    var appState = Provider.of<AppState>(context, listen: false);
+    // Load values from AppState
+    final appState = Provider.of<AppState>(context, listen: false);
+    _enableMatchDuration = appState.session.enableMatchDuration;
+    _enableTargetDuration = appState.session.enableTargetDuration;
+    _enableSound = appState.session.enableSound;
+    _matchSegments = appState.session.matchSegments == 2 ? "Halves" : "Quarters";
+    _theme = appState.isDarkTheme ? "Dark" : "Light";
     _matchDurationController.text = (appState.session.matchDuration ~/ 60).toString();
     _targetDurationController.text = (appState.session.targetPlayDuration ~/ 60).toString();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppState>(
-      builder: (context, appState, child) {
-        // Update controllers if values have changed
-        if (_matchDurationController.text != (appState.session.matchDuration ~/ 60).toString()) {
-          _matchDurationController.text = (appState.session.matchDuration ~/ 60).toString();
-        }
-        
-        if (_targetDurationController.text != (appState.session.targetPlayDuration ~/ 60).toString()) {
-          _targetDurationController.text = (appState.session.targetPlayDuration ~/ 60).toString();
-        }
-        
-        return Scaffold(
-          appBar: AppBar(
-            title: Text('Settings'),
-          ),
-          body: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: ListView(
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: Text('Match Duration')),
-                    Switch(
-                      value: appState.session.enableMatchDuration,
-                      onChanged: (value) async {
-                        await appState.toggleMatchDuration(value);
-                      },
-                    ),
-                    if (appState.session.enableMatchDuration)
-                      Expanded(
-                        child: TextField(
-                          controller: _matchDurationController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(labelText: 'Minutes'),
-                          onChanged: (value) {
-                            var minutes = int.tryParse(value) ?? 90;
-                            if (minutes >= 1) appState.updateMatchDuration(minutes);
-                          },
-                        ),
-                      ),
-                  ],
+    final isDark = Provider.of<AppState>(context).isDarkTheme;
+    
+    return Scaffold(
+      backgroundColor: isDark ? AppThemes.darkBackground : AppThemes.lightBackground,
+      appBar: AppBar(
+        backgroundColor: isDark ? AppThemes.darkPrimaryBlue : AppThemes.lightPrimaryBlue,
+        title: Text('Settings'),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Match Duration
+              _buildSettingRow(
+                "Match Duration",
+                Switch(
+                  value: _enableMatchDuration,
+                  activeColor: Colors.deepPurple,
+                  activeTrackColor: Colors.deepPurple.withOpacity(0.5),
+                  onChanged: (value) {
+                    setState(() {
+                      _enableMatchDuration = value;
+                    });
+                  },
                 ),
-                if (appState.session.enableMatchDuration)
-                  Row(
-                    children: [
-                      Expanded(child: Text('Match Segments')),
-                      DropdownButton<int>(
-                        value: appState.session.matchSegments,
-                        items: [
-                          DropdownMenuItem(value: 2, child: Text('Halves')),
-                          DropdownMenuItem(value: 4, child: Text('Quarters')),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) appState.updateMatchSegments(value);
-                        },
-                      ),
-                    ],
+                _enableMatchDuration ? TextField(
+                  controller: _matchDurationController,
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black,
                   ),
-                Row(
-                  children: [
-                    Expanded(child: Text('Target Play Duration')),
-                    Switch(
-                      value: appState.session.enableTargetDuration,
-                      onChanged: (value) async {
-                        await appState.toggleTargetDuration(value);
-                      },
+                  decoration: InputDecoration(
+                    labelText: "Minutes",
+                    labelStyle: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black54,
                     ),
-                    if (appState.session.enableTargetDuration)
-                      Expanded(
-                        child: TextField(
-                          controller: _targetDurationController,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(labelText: 'Minutes'),
-                          onChanged: (value) async {
-                            var minutes = int.tryParse(value) ?? 16;
-                            if (minutes >= 1) await appState.updateTargetDuration(minutes);
-                          },
-                        ),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(
+                        color: isDark ? Colors.white30 : Colors.black26,
                       ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Expanded(child: Text('Theme')),
-                    DropdownButton<bool>(
-                      value: appState.isDarkTheme,
-                      items: [
-                        DropdownMenuItem(value: true, child: Text('Dark')),
-                        DropdownMenuItem(value: false, child: Text('Light')),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) appState.toggleTheme();
-                      },
                     ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Expanded(child: Text('Sound')),
-                    Switch(
-                      value: appState.session.enableSound,
-                      onChanged: (value) => appState.toggleSound(value),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(
+                        color: Colors.deepPurple,
+                      ),
                     ),
-                  ],
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => MatchLogScreen()),
-                    );
+                  ),
+                ) : Container(),
+              ),
+              SizedBox(height: 8),
+              
+              // Match Segments - only visible when match duration is enabled
+              _enableMatchDuration ? Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Match Segments",
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                      fontSize: 16,
+                    ),
+                  ),
+                  DropdownButton<String>(
+                    value: _matchSegments,
+                    dropdownColor: isDark ? Colors.grey[850] : Colors.white,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                    icon: Icon(
+                      Icons.arrow_drop_down,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                    underline: Container(
+                      height: 1,
+                      color: isDark ? Colors.white30 : Colors.black26,
+                    ),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          _matchSegments = newValue;
+                        });
+                      }
+                    },
+                    items: <String>['Halves', 'Quarters']
+                        .map<DropdownMenuItem<String>>((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ) : Container(),
+              Divider(color: isDark ? Colors.white24 : Colors.black12),
+              
+              // Target Play Duration
+              _buildSettingRow(
+                "Target Play\nDuration",
+                Switch(
+                  value: _enableTargetDuration,
+                  activeColor: Colors.deepPurple,
+                  activeTrackColor: Colors.deepPurple.withOpacity(0.5),
+                  onChanged: (value) {
+                    setState(() {
+                      _enableTargetDuration = value;
+                    });
                   },
-                  child: Text('View Match Log'),
                 ),
-                ElevatedButton(
-                  onPressed: () {
-                    // Flutter handles app installation differently; this can be removed or replaced
-                  },
-                  child: Text('Install App'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    await FileService().exportToCsv(appState.session, appState.currentSessionPassword ?? 'session');
-                  },
-                  child: Text('Export Times to CSV'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    await FileService().backupSession(appState.session, appState.currentSessionPassword ?? 'session');
-                  },
-                  child: Text('Backup Session'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    var restoredSession = await FileService().restoreSession();
-                    if (restoredSession != null && appState.currentSessionPassword != null) {
-                      appState.session = restoredSession;
-                      await appState.saveSession();
-                      appState.notifyListeners();
+                _enableTargetDuration ? TextField(
+                  controller: _targetDurationController,
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: "Minutes",
+                    labelStyle: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(
+                        color: isDark ? Colors.white30 : Colors.black26,
+                      ),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(
+                        color: Colors.deepPurple,
+                      ),
+                    ),
+                  ),
+                ) : Container(),
+              ),
+              SizedBox(height: 8),
+              
+              // Theme
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Theme",
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                      fontSize: 16,
+                    ),
+                  ),
+                  DropdownButton<String>(
+                    value: _theme,
+                    dropdownColor: isDark ? Colors.grey[850] : Colors.white,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                    icon: Icon(
+                      Icons.arrow_drop_down,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                    underline: Container(
+                      height: 1,
+                      color: isDark ? Colors.white30 : Colors.black26,
+                    ),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          _theme = newValue;
+                          Provider.of<AppState>(context, listen: false).toggleTheme();
+                        });
+                      }
+                    },
+                    items: <String>['Dark', 'Light']
+                        .map<DropdownMenuItem<String>>((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              Divider(color: isDark ? Colors.white24 : Colors.black12),
+              
+              // Sound
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Sound",
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Switch(
+                    value: _enableSound,
+                    activeColor: Colors.grey,
+                    activeTrackColor: Colors.grey.withOpacity(0.5),
+                    onChanged: (value) {
+                      setState(() {
+                        _enableSound = value;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              Divider(color: isDark ? Colors.white24 : Colors.black12),
+              
+              // Action buttons
+              SizedBox(height: 16),
+              _buildActionButton(
+                "View Match Log",
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => MatchLogScreen()),
+                  );
+                },
+                isDark ? Colors.deepPurple[700]! : Colors.deepPurple,
+              ),
+              
+              SizedBox(height: 12),
+              _buildActionButton(
+                "Install App",
+                () {
+                  // This would trigger the install prompt in a PWA context
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Installation option would appear here in web context")),
+                  );
+                },
+                isDark ? Colors.blue[700]! : Colors.blue,
+              ),
+              
+              SizedBox(height: 12),
+              _buildActionButton(
+                "Export Times to CSV",
+                () {
+                  // Export logic using FileService
+                  final appState = Provider.of<AppState>(context, listen: false);
+                  if (appState.currentSessionPassword != null) {
+                    FileService().exportToCsv(
+                      appState.session, 
+                      appState.currentSessionPassword!
+                    ).then((_) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Session restored successfully!')),
+                        SnackBar(content: Text("CSV file exported successfully")),
+                      );
+                    }).catchError((error) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Error exporting CSV: $error")),
+                      );
+                    });
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("No active session to export")),
+                    );
+                  }
+                },
+                isDark ? Colors.indigo[700]! : Colors.indigo,
+              ),
+              
+              SizedBox(height: 12),
+              _buildActionButton(
+                "Backup Session",
+                () {
+                  // Backup logic using FileService
+                  final appState = Provider.of<AppState>(context, listen: false);
+                  if (appState.currentSessionPassword != null) {
+                    FileService().backupSession(
+                      appState.session, 
+                      appState.currentSessionPassword!
+                    ).then((_) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Session backed up successfully")),
+                      );
+                    }).catchError((error) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Error backing up session: $error")),
+                      );
+                    });
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("No active session to back up")),
+                    );
+                  }
+                },
+                isDark ? Colors.teal[700]! : Colors.teal,
+              ),
+              
+              SizedBox(height: 12),
+              _buildActionButton(
+                "Restore Session",
+                () {
+                  // Restore logic using FileService
+                  final appState = Provider.of<AppState>(context, listen: false);
+                  FileService().restoreSession().then((session) {
+                    if (session != null) {
+                      // Set the restored session
+                      appState.session = session;
+                      appState.saveSession();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Session restored successfully")),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("No session file selected or invalid file")),
                       );
                     }
-                  },
-                  child: Text('Restore Session'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    // Save all current settings explicitly
-                    var appState = Provider.of<AppState>(context, listen: false);
-                    
-                    // Update from controllers
-                    var matchMinutes = int.tryParse(_matchDurationController.text) ?? 90;
-                    var targetMinutes = int.tryParse(_targetDurationController.text) ?? 16;
-                    
-                    // Use a transaction-like approach to update all settings at once
-                    await appState.updateMatchDuration(matchMinutes);
-                    await appState.updateTargetDuration(targetMinutes);
-                    
+                  }).catchError((error) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Settings saved successfully')),
+                      SnackBar(content: Text("Error restoring session: $error")),
                     );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                  ),
-                  child: Text('Save Settings'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Close'),
-                ),
-              ],
+                  });
+                },
+                isDark ? Colors.amber[900]! : Colors.amber[700]!,
+              ),
+              
+              SizedBox(height: 24),
+              _buildActionButton(
+                "Save Settings",
+                () {
+                  // Save all settings
+                  final appState = Provider.of<AppState>(context, listen: false);
+                  
+                  // Update match duration if the field has a valid value
+                  final matchDuration = int.tryParse(_matchDurationController.text) ?? 90;
+                  if (matchDuration > 0) {
+                    appState.updateMatchDuration(matchDuration);
+                  }
+                  
+                  // Update target duration if the field has a valid value
+                  final targetDuration = int.tryParse(_targetDurationController.text) ?? 16;
+                  if (targetDuration > 0) {
+                    appState.updateTargetDuration(targetDuration);
+                  }
+                  
+                  // Update other settings
+                  appState.toggleMatchDuration(_enableMatchDuration);
+                  appState.toggleTargetDuration(_enableTargetDuration);
+                  appState.toggleSound(_enableSound);
+                  appState.updateMatchSegments(_matchSegments == "Halves" ? 2 : 4);
+                  
+                  // Save all settings to the database
+                  appState.saveSession();
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Settings saved successfully")),
+                  );
+                  Navigator.pop(context);
+                },
+                Colors.green,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildSettingRow(String label, Widget toggle, Widget input) {
+    final isDark = Provider.of<AppState>(context).isDarkTheme;
+    
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black,
+              fontSize: 16,
             ),
           ),
-        );
-      },
+        ),
+        toggle,
+        Expanded(
+          flex: 2,
+          child: input,
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildActionButton(String text, VoidCallback onPressed, Color color) {
+    final isDark = Provider.of<AppState>(context).isDarkTheme;
+    
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 16,
+          ),
+        ),
+      ),
     );
   }
   

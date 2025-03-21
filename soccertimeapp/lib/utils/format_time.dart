@@ -1,5 +1,5 @@
 String formatTime(int seconds) {
-  var mins = seconds ~/ 60;
-  var secs = seconds % 60;
-  return '$mins:${secs < 10 ? '0$secs' : secs}';
+  int minutes = seconds ~/ 60;
+  int remainingSeconds = seconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
 }

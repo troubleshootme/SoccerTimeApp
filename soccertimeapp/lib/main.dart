@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'screens/session_prompt_screen.dart';
 import 'providers/app_state.dart';
 import 'screens/main_screen.dart';
+import 'utils/app_themes.dart';
 
 void main() {
   runApp(
@@ -20,11 +21,9 @@ class SoccerTimeApp extends StatelessWidget {
       builder: (context, appState, child) {
         return MaterialApp(
           title: 'SoccerTimeApp',
-          theme: ThemeData(
-            primarySwatch: Colors.blue,
-            brightness: appState.isDarkTheme ? Brightness.dark : Brightness.light,
-            fontFamily: 'Verdana',
-          ),
+          theme: AppThemes.lightTheme(),
+          darkTheme: AppThemes.darkTheme(),
+          themeMode: appState.isDarkTheme ? ThemeMode.dark : ThemeMode.light,
           home: SessionPromptScreen(),
           routes: {
             '/main': (context) => MainScreen(),

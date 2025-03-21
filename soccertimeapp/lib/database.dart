@@ -57,38 +57,176 @@ class SessionDatabase {
         FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
       )
     ''');
+    await db.execute('''
+      CREATE TABLE session_settings (
+        session_id INTEGER PRIMARY KEY,
+        enable_match_duration BOOLEAN NOT NULL DEFAULT 0,
+        match_duration INTEGER NOT NULL DEFAULT 90,
+        match_segments INTEGER NOT NULL DEFAULT 2,
+        enable_target_duration BOOLEAN NOT NULL DEFAULT 0,
+        target_play_duration INTEGER NOT NULL DEFAULT 20,
+        enable_sound BOOLEAN NOT NULL DEFAULT 1,
+        FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<int> insertSession(String name) async {
-    final db = await database;
-    final data = {'name': name, 'created_at': DateTime.now().millisecondsSinceEpoch};
-    return await db.insert('sessions', data);
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final sessions = prefs.getString('sessions') ?? '[]';
+      final sessionList = List<Map<String, dynamic>>.from(jsonDecode(sessions));
+      final newId = sessionList.isEmpty ? 1 : sessionList.map((s) => s['id'] as int).reduce((a, b) => a > b ? a : b) + 1;
+      final session = {'id': newId, 'name': name, 'created_at': DateTime.now().millisecondsSinceEpoch};
+      sessionList.add(session);
+      await prefs.setString('sessions', jsonEncode(sessionList));
+      return newId;
+    } else {
+      final db = await database;
+      final data = {'name': name, 'created_at': DateTime.now().millisecondsSinceEpoch};
+      return await db.insert('sessions', data);
+    }
   }
 
   Future<List<Map<String, dynamic>>> getAllSessions() async {
-    final db = await database;
-    return await db.query('sessions', orderBy: 'created_at DESC');
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final sessions = prefs.getString('sessions') ?? '[]';
+      final sessionList = List<Map<String, dynamic>>.from(jsonDecode(sessions));
+      sessionList.sort((a, b) => (b['created_at'] as int).compareTo(a['created_at'] as int));
+      return sessionList;
+    } else {
+      final db = await database;
+      return await db.query('sessions', orderBy: 'created_at DESC');
+    }
   }
 
   Future<List<Map<String, dynamic>>> getPlayersForSession(int sessionId) async {
-    final db = await database;
-    return await db.query('players', where: 'session_id = ?', whereArgs: [sessionId]);
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final players = prefs.getString('players_$sessionId') ?? '[]';
+      return List<Map<String, dynamic>>.from(jsonDecode(players));
+    } else {
+      final db = await database;
+      return await db.query('players', where: 'session_id = ?', whereArgs: [sessionId]);
+    }
   }
 
   Future<int> insertPlayer(int sessionId, String name, int timerSeconds) async {
-    final db = await database;
-    final data = {'session_id': sessionId, 'name': name, 'timer_seconds': timerSeconds};
-    return await db.insert('players', data);
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final playersKey = 'players_$sessionId';
+      final players = prefs.getString(playersKey) ?? '[]';
+      final playerList = List<Map<String, dynamic>>.from(jsonDecode(players));
+      final newId = playerList.isEmpty ? 1 : playerList.map((p) => p['id'] as int).reduce((a, b) => a > b ? a : b) + 1;
+      final player = {'id': newId, 'session_id': sessionId, 'name': name, 'timer_seconds': timerSeconds};
+      playerList.add(player);
+      await prefs.setString(playersKey, jsonEncode(playerList));
+      return newId;
+    } else {
+      final db = await database;
+      final data = {'session_id': sessionId, 'name': name, 'timer_seconds': timerSeconds};
+      return await db.insert('players', data);
+    }
   }
 
   Future<void> updatePlayerTimer(int playerId, int timerSeconds) async {
-    final db = await database;
-    await db.update(
-      'players',
-      {'timer_seconds': timerSeconds},
-      where: 'id = ?',
-      whereArgs: [playerId],
-    );
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final sessions = await getAllSessions();
+      final session = sessions.firstWhere((s) => s['id'] == playerId, orElse: () => {'id': -1});
+      final sessionId = session['id'] != -1 ? session['id'] : null;
+      if (sessionId != null) {
+        final playersKey = 'players_$sessionId';
+        final players = prefs.getString(playersKey) ?? '[]';
+        final playerList = List<Map<String, dynamic>>.from(jsonDecode(players));
+        final playerIndex = playerList.indexWhere((p) => p['id'] == playerId);
+        if (playerIndex != -1) {
+          playerList[playerIndex]['timer_seconds'] = timerSeconds;
+          await prefs.setString(playersKey, jsonEncode(playerList));
+        }
+      }
+    } else {
+      final db = await database;
+      await db.update(
+        'players',
+        {'timer_seconds': timerSeconds},
+        where: 'id = ?',
+        whereArgs: [playerId],
+      );
+    }
+  }
+
+  Future<void> saveSessionSettings(int sessionId, Map<String, dynamic> settings) async {
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      await prefs.setString('settings_$sessionId', jsonEncode(settings));
+    } else {
+      final db = await database;
+      
+      // Check if settings exist for this session
+      final List<Map<String, dynamic>> existing = await db.query(
+        'session_settings',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+      
+      if (existing.isEmpty) {
+        // Insert new settings
+        await db.insert('session_settings', {
+          'session_id': sessionId,
+          'enable_match_duration': settings['enableMatchDuration'] ? 1 : 0,
+          'match_duration': settings['matchDuration'],
+          'match_segments': settings['matchSegments'],
+          'enable_target_duration': settings['enableTargetDuration'] ? 1 : 0,
+          'target_play_duration': settings['targetPlayDuration'],
+          'enable_sound': settings['enableSound'] ? 1 : 0,
+        });
+      } else {
+        // Update existing settings
+        await db.update(
+          'session_settings',
+          {
+            'enable_match_duration': settings['enableMatchDuration'] ? 1 : 0,
+            'match_duration': settings['matchDuration'],
+            'match_segments': settings['matchSegments'],
+            'enable_target_duration': settings['enableTargetDuration'] ? 1 : 0,
+            'target_play_duration': settings['targetPlayDuration'],
+            'enable_sound': settings['enableSound'] ? 1 : 0,
+          },
+          where: 'session_id = ?',
+          whereArgs: [sessionId],
+        );
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> getSessionSettings(int sessionId) async {
+    if (kIsWeb) {
+      final prefs = await this.prefs;
+      final settings = prefs.getString('settings_$sessionId');
+      if (settings == null) return null;
+      return Map<String, dynamic>.from(jsonDecode(settings));
+    } else {
+      final db = await database;
+      final List<Map<String, dynamic>> results = await db.query(
+        'session_settings',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+      
+      if (results.isEmpty) return null;
+      
+      final dbSettings = results.first;
+      return {
+        'enableMatchDuration': dbSettings['enable_match_duration'] == 1,
+        'matchDuration': dbSettings['match_duration'],
+        'matchSegments': dbSettings['match_segments'],
+        'enableTargetDuration': dbSettings['enable_target_duration'] == 1,
+        'targetPlayDuration': dbSettings['target_play_duration'],
+        'enableSound': dbSettings['enable_sound'] == 1,
+      };
+    }
   }
 
   Future<void> close() async {
