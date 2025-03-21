@@ -14,14 +14,15 @@ class Player {
   });
 
   Map<String, dynamic> toJson() => {
+        'name': name,
         'totalTime': totalTime,
         'active': active,
         'startTime': startTime,
         'time': time,
       };
 
-  factory Player.fromJson(String name, Map<String, dynamic> json) => Player(
-        name: name,
+  factory Player.fromJson(Map<String, dynamic> json) => Player(
+        name: json['name'] as String,
         totalTime: json['totalTime'] ?? 0,
         active: json['active'] ?? false,
         startTime: json['startTime'] ?? 0,

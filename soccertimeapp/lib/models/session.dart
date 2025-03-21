@@ -18,6 +18,7 @@ class Session {
   bool hasWhistlePlayed;
   bool enableSound;
   List<MatchLogEntry> matchLog;
+  String sessionName;
 
   Session({
     Map<String, Player>? players,
@@ -36,6 +37,7 @@ class Session {
     this.hasWhistlePlayed = false,
     this.enableSound = false,
     List<MatchLogEntry>? matchLog,
+    this.sessionName = '',
   }) : players = players ?? <String, Player>{},
        currentOrder = currentOrder ?? <String>[],
        activeBeforePause = activeBeforePause ?? <String>[],
@@ -74,11 +76,12 @@ class Session {
         'hasWhistlePlayed': hasWhistlePlayed,
         'enableSound': enableSound,
         'matchLog': matchLog.map((entry) => entry.toJson()).toList(),
+        'sessionName': sessionName,
       };
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
         players: (json['players'] as Map<String, dynamic>?)?.map(
-              (key, value) => MapEntry(key, Player.fromJson(key, value)),
+              (key, value) => MapEntry(key, Player.fromJson(Map<String, dynamic>.from(value)..['name'] = key)),
             ) ?? <String, Player>{},
         currentOrder: List<String>.from(json['currentOrder'] ?? []),
         isPaused: json['isPaused'] ?? false,
@@ -94,8 +97,9 @@ class Session {
         currentPeriod: json['currentPeriod'] ?? 1,
         hasWhistlePlayed: json['hasWhistlePlayed'] ?? false,
         enableSound: json['enableSound'] ?? false,
-        matchLog: (json['matchLog'] as List<dynamic>?)
-                ?.map((entry) => MatchLogEntry.fromJson(entry))
+        sessionName: json['sessionName'] ?? '',
+        matchLog: (json['matchLog'] as List?)
+                ?.map((e) => MatchLogEntry.fromJson(e as Map<String, dynamic>))
                 .toList() ?? <MatchLogEntry>[],
       );
 }

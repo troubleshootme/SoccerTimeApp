@@ -261,18 +261,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               
               SizedBox(height: 12),
               _buildActionButton(
-                "Install App",
-                () {
-                  // This would trigger the install prompt in a PWA context
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Installation option would appear here in web context")),
-                  );
-                },
-                isDark ? Colors.blue[700]! : Colors.blue,
-              ),
-              
-              SizedBox(height: 12),
-              _buildActionButton(
                 "Export Times to CSV",
                 () {
                   // Export logic using FileService

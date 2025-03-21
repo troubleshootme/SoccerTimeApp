@@ -49,9 +49,12 @@ class PeriodEndDialog extends StatelessWidget {
               if (!isGameOver) 
                 ElevatedButton(
                   onPressed: () {
-                    // First call startNextPeriod and then pauseAll to resume
+                    // Start next period
+                    final appState = Provider.of<AppState>(context, listen: false);
                     appState.startNextPeriod();
-                    appState.pauseAll();
+                    
+                    // Close the dialog
+                    Navigator.of(context).pop();
                   },
                   child: Text('Start Next $periodTerminology'),
                   style: ElevatedButton.styleFrom(

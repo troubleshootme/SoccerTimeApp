@@ -27,13 +27,20 @@ class AppState with ChangeNotifier {
     _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
     _players.sort((a, b) => a['name'].compareTo(b['name']));
     
+    // Get session info to get the name
+    final allSessions = await SessionDatabase.instance.getAllSessions();
+    final sessionInfo = allSessions.firstWhere((s) => s['id'] == sessionId, orElse: () => {'name': ''});
+    final sessionName = sessionInfo['name'] ?? '';
+    _currentSessionPassword = sessionName;
+    
     // Initialize session with default values
-    _session = Session();
+    _session = Session(sessionName: sessionName);
     
     // Load session settings if they exist
     final settings = await SessionDatabase.instance.getSessionSettings(sessionId);
     if (settings != null) {
       _session = Session(
+        sessionName: sessionName,
         enableMatchDuration: settings['enableMatchDuration'],
         matchDuration: settings['matchDuration'],
         matchSegments: settings['matchSegments'],
@@ -56,7 +63,7 @@ class AppState with ChangeNotifier {
     _currentSessionId = await SessionDatabase.instance.insertSession(name);
     _currentSessionPassword = name;
     _players = [];
-    _session = Session();
+    _session = Session(sessionName: name);
     notifyListeners();
   }
 
@@ -164,9 +171,17 @@ class AppState with ChangeNotifier {
   Future<void> setCurrentSession(int sessionId) async {
     _currentSessionId = sessionId;
     _players = await SessionDatabase.instance.getPlayersForSession(sessionId);
+    _players.sort((a, b) => a['name'].compareTo(b['name']));
+    
+    // Get session info for the name
+    final allSessions = await SessionDatabase.instance.getAllSessions();
+    final sessionInfo = allSessions.firstWhere((s) => s['id'] == sessionId, orElse: () => {'name': ''});
+    final sessionName = sessionInfo['name'] ?? '';
+    _currentSessionPassword = sessionName;
     
     // Initialize an empty session
     _session = Session(
+      sessionName: sessionName,
       enableMatchDuration: false,
       matchDuration: 90,
       matchSegments: 2,
@@ -179,6 +194,7 @@ class AppState with ChangeNotifier {
     final settings = await SessionDatabase.instance.getSessionSettings(sessionId);
     if (settings != null) {
       _session = Session(
+        sessionName: sessionName,
         enableMatchDuration: settings['enableMatchDuration'],
         matchDuration: settings['matchDuration'],
         matchSegments: settings['matchSegments'],
@@ -221,19 +237,34 @@ class AppState with ChangeNotifier {
     }
   }
   
-  Future<void> resetPlayerTime(String name) async {
-    if (_session.players.containsKey(name)) {
-      final player = _session.players[name]!;
-      player.totalTime = 0;
-      player.time = 0;
-      player.active = false;
+  Future<void> resetPlayerTime(String playerName) async {
+    if (_currentSessionId == null) return;
+    if (_session.players.containsKey(playerName)) {
+      // Reset the player's time
+      _session.players[playerName]!.totalTime = 0;
+      _session.players[playerName]!.time = 0;
       
-      // Save the updated time
-      final playerIndex = _players.indexWhere((p) => p['name'] == name);
-      if (playerIndex != -1 && _currentSessionId != null) {
-        await updatePlayerTimer(_players[playerIndex]['id'], 0);
+      // Ensure the player is not active but can be activated again
+      if (_session.players[playerName]!.active) {
+        _session.players[playerName]!.active = false;
+        _session.players[playerName]!.startTime = 0;
       }
       
+      // Update in database
+      if (_currentSessionId != null) {
+        // Find player in _players list
+        final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
+        if (playerIndex != -1) {
+          // Use the player's ID to update the timer
+          final playerId = _players[playerIndex]['id'] as int;
+          await SessionDatabase.instance.updatePlayerTimer(playerId, 0);
+          
+          // Update local list
+          _players[playerIndex]['timer_seconds'] = 0;
+        }
+      }
+      
+      saveSession();
       notifyListeners();
     }
   }
@@ -274,5 +305,141 @@ class AppState with ChangeNotifier {
     
     await saveSession();
     notifyListeners();
+  }
+
+  void startNextPeriod() {
+    // Move to next period
+    _session.currentPeriod++;
+    
+    // Get active players from before the pause
+    List<String> activePlayers = List.from(_session.activeBeforePause);
+    
+    // Set match running if we still have periods left
+    if (_session.currentPeriod <= _session.matchSegments) {
+      _session.matchRunning = true;
+      _session.isPaused = false;
+      
+      // Reactivate players that were active before period ended
+      for (var playerName in activePlayers) {
+        // Check if player exists and is not already active
+        if (_session.players.containsKey(playerName) && !_session.players[playerName]!.active) {
+          _session.players[playerName]!.active = true;
+          _session.players[playerName]!.startTime = DateTime.now().millisecondsSinceEpoch;
+        }
+      }
+      
+      // Clear the activeBeforePause list
+      _session.activeBeforePause.clear();
+    } else {
+      // Match is over
+      _session.matchRunning = false;
+    }
+    
+    saveSession();
+    notifyListeners();
+  }
+  
+  void pauseAll() {
+    // This is a proxy to the pauseAll function in MainScreen
+    // In this implementation, we just update the session state
+    _session.isPaused = !_session.isPaused;
+    
+    if (_session.isPaused) {
+      // Store active players and deactivate them
+      _session.activeBeforePause = [];
+      for (var playerName in _session.players.keys) {
+        if (_session.players[playerName]!.active) {
+          _session.activeBeforePause.add(playerName);
+          // Deactivate the player
+          togglePlayer(playerName);
+        }
+      }
+    } else {
+      // Reactivate players that were active before pause
+      for (var playerName in _session.activeBeforePause) {
+        if (_session.players.containsKey(playerName)) {
+          togglePlayer(playerName);
+        }
+      }
+      _session.activeBeforePause = [];
+    }
+    
+    saveSession();
+    notifyListeners();
+  }
+
+  // Store active players and handle state changes for period transitions
+  void storeActivePlayersForPeriodChange() {
+    // Store active players
+    _session.activeBeforePause = [];
+    for (var playerName in _session.players.keys) {
+      if (_session.players[playerName]!.active) {
+        _session.activeBeforePause.add(playerName);
+        
+        // Deactivate player and update their time
+        final player = _session.players[playerName]!;
+        final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000;
+        player.totalTime += timeElapsed;
+        player.active = false;
+      }
+    }
+    
+    // Update session state
+    _session.isPaused = true;
+    saveSession();
+    notifyListeners();
+  }
+
+  // Rename a player
+  Future<void> renamePlayer(String oldName, String newName) async {
+    if (_currentSessionId == null) return;
+    if (_session.players.containsKey(oldName)) {
+      // Get the player's current data
+      final player = _session.players[oldName]!;
+      
+      // Remove the old player entry
+      _session.players.remove(oldName);
+      
+      // Add with the new name but keeping the same time data
+      _session.players[newName] = Player(
+        name: newName,
+        totalTime: player.totalTime,
+        active: player.active,
+        startTime: player.startTime,
+        time: player.time,
+      );
+      
+      // Update in database
+      if (_currentSessionId != null) {
+        // Find the player in our list
+        final playerIndex = _players.indexWhere((p) => p['name'] == oldName);
+        if (playerIndex != -1) {
+          // Remove the old entry
+          final oldPlayerId = _players[playerIndex]['id'];
+          _players.removeAt(playerIndex);
+          
+          // Add the new entry
+          final newPlayerId = await SessionDatabase.instance.insertPlayer(
+            _currentSessionId!, 
+            newName, 
+            player.totalTime
+          );
+          
+          // Add to local list
+          _players.add({
+            'id': newPlayerId,
+            'name': newName,
+            'timer_seconds': player.totalTime,
+            'session_id': _currentSessionId!,
+          });
+          
+          // Sort the player list alphabetically
+          _players.sort((a, b) => a['name'].compareTo(b['name']));
+        }
+      }
+      
+      saveSession();
+      notifyListeners();
+    }
   }
 }

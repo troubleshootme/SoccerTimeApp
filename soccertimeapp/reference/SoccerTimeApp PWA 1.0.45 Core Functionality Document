@@ -68,8 +68,10 @@ SoccerTimeApp PWA 1.0.45 is a Progressive Web App (PWA) designed to track and ma
   - **Periods**:
     - Configurable via `matchSegments` (2 for halves, 4 for quarters) and `matchDuration`.
     - Each period’s duration is `matchDuration / matchSegments`.
-    - When `matchTime` reaches a period’s end (`periodEndTime`), `showPeriodEndOverlay()` is triggered, pausing the timer and showing a prompt to start the next period.
-    - Clicking `#next-period-btn` (`startNextPeriod()`) advances `currentPeriod`, reactivates players, and resumes the timer.
+    - When `matchTime` reaches a period’s end (`periodEndTime`), `showPeriodEndOverlay()` is triggered, pausing all timers and showing a prompt to start the next period.
+      
+    - Clicking `#next-period-btn` (`startNextPeriod()`) advances `currentPeriod`, reactivates players that were active when period ended, and resumes the timers.
+
     - If `currentPeriod > matchSegments`, the match ends (`Match Complete`).
   - **Pause/Resume**:
     - Clicking `#pause-all` triggers `pauseAll()`.

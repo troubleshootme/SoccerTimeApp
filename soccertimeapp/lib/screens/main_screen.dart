@@ -5,6 +5,7 @@ import '../utils/app_themes.dart';
 import '../screens/settings_screen.dart';
 import '../models/player.dart';
 import 'dart:async';
+import '../widgets/period_end_dialog.dart';
 
 class MainScreen extends StatefulWidget {
   @override
@@ -27,7 +28,11 @@ class _MainScreenState extends State<MainScreen> {
     // Load match time from session and convert to tracking value (2x for 500ms timer)
     _matchTime = appState.session.matchTime * 2;
     _isPaused = appState.session.isPaused;
-    _sessionName = appState.currentSessionPassword ?? "New Session";
+    
+    // Use session name from the session object or currentSessionPassword
+    _sessionName = appState.session.sessionName.isNotEmpty 
+        ? appState.session.sessionName 
+        : (appState.currentSessionPassword ?? "New Session");
     
     _startMatchTimer();
   }
@@ -63,6 +68,9 @@ class _MainScreenState extends State<MainScreen> {
             final seconds = _matchTime ~/ 2;
             appState.session.matchTime = seconds;
             appState.session.matchRunning = true;
+            
+            // Check for period transitions
+            _checkPeriodEnd();
           }
         });
       }
@@ -86,7 +94,23 @@ class _MainScreenState extends State<MainScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
     if (appState.currentSessionId == null) return;
 
+    // Get the player name from the index, using a safety check
+    if (index < 0 || index >= appState.players.length) return;
     final playerName = appState.players[index]['name'];
+    
+    // Toggle this specific player
+    await appState.togglePlayer(playerName);
+  }
+
+  // Add an alternative toggle method by player name
+  void _togglePlayerByName(String playerName) async {
+    // Don't allow toggling if paused
+    if (_isPaused) return;
+    
+    final appState = Provider.of<AppState>(context, listen: false);
+    if (appState.currentSessionId == null) return;
+
+    // Toggle this specific player
     await appState.togglePlayer(playerName);
   }
 
@@ -209,10 +233,193 @@ class _MainScreenState extends State<MainScreen> {
     return playerTime;
   }
 
+  // Add this method to check for period transitions
+  void _checkPeriodEnd() {
+    final appState = Provider.of<AppState>(context, listen: false);
+    
+    if (!appState.session.enableMatchDuration) return;
+    
+    // Calculate period duration
+    final periodDuration = appState.session.matchDuration / appState.session.matchSegments;
+    
+    // Calculate when the current period should end
+    final currentPeriodEndTime = periodDuration * appState.session.currentPeriod;
+    
+    // Check if we've reached the end of a period
+    if (appState.session.matchTime >= currentPeriodEndTime && 
+        appState.session.currentPeriod <= appState.session.matchSegments &&
+        !_isPaused) {
+      
+      // Save active players to session
+      appState.storeActivePlayersForPeriodChange();
+      
+      // Update UI state to reflect pause
+      setState(() {
+        _isPaused = true;
+      });
+      
+      // Show period end dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PeriodEndDialog(),
+      ).then((_) {
+        // If dialog is dismissed without starting next period, restore the pause state
+        if (appState.session.isPaused) {
+          setState(() {
+            _isPaused = appState.session.isPaused;
+          });
+        }
+      });
+    }
+  }
+
+  void _showPlayerContextMenu(BuildContext context, String playerName, int index) {
+    final appState = Provider.of<AppState>(context, listen: false);
+    final isDark = appState.isDarkTheme;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? AppThemes.darkCardBackground : AppThemes.lightCardBackground,
+        title: Text(
+          'Player Actions: $playerName',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black,
+            fontSize: 18,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.edit, color: Colors.blue),
+              title: Text(
+                'Edit Player',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+              ),
+              onTap: () {
+                Navigator.pop(context); // Close dialog
+                _showEditPlayerDialog(playerName);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete, color: Colors.red),
+              title: Text(
+                'Remove Player',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+              ),
+              onTap: () {
+                Navigator.pop(context); // Close dialog
+                _showRemovePlayerConfirmation(playerName);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.timer_off, color: Colors.orange),
+              title: Text(
+                'Reset Time',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+              ),
+              onTap: () {
+                Navigator.pop(context); // Close dialog
+                _resetPlayerTime(playerName);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showEditPlayerDialog(String playerName) {
+    final textController = TextEditingController(text: playerName);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Edit Player'),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          decoration: InputDecoration(hintText: 'Player Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final newName = textController.text.trim();
+              if (newName.isNotEmpty && newName != playerName) {
+                final appState = Provider.of<AppState>(context, listen: false);
+                appState.renamePlayer(playerName, newName);
+                Navigator.pop(context);
+              }
+            },
+            child: Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showRemovePlayerConfirmation(String playerName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Player'),
+        content: Text('Are you sure you want to remove $playerName?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final appState = Provider.of<AppState>(context, listen: false);
+              appState.removePlayer(playerName);
+              Navigator.pop(context);
+            },
+            child: Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _resetPlayerTime(String playerName) {
+    final appState = Provider.of<AppState>(context, listen: false);
+    
+    // Deactivate player if active
+    if (appState.session.players[playerName]?.active ?? false) {
+      appState.togglePlayer(playerName);
+    }
+    
+    // Reset player time
+    appState.resetPlayerTime(playerName);
+    
+    // Show confirmation
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Reset time for $playerName')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppState>(context);
     final isDark = appState.isDarkTheme;
+    
+    // Ensure local pause state stays in sync with session state
+    if (_isPaused != appState.session.isPaused) {
+      _isPaused = appState.session.isPaused;
+    }
     
     return Scaffold(
       backgroundColor: isDark ? AppThemes.darkBackground : AppThemes.lightBackground,
@@ -225,7 +432,7 @@ class _MainScreenState extends State<MainScreen> {
                 children: [
                   // Session header
                   Container(
-                    padding: EdgeInsets.all(16),
+                    padding: EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: isDark ? AppThemes.darkCardBackground : AppThemes.lightCardBackground,
                       borderRadius: BorderRadius.circular(8),
@@ -234,100 +441,120 @@ class _MainScreenState extends State<MainScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          'Session: $_sessionName',
+                          _sessionName,
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                            color: Colors.lightBlue,
+                            letterSpacing: 1.2,
                           ),
                         ),
                       ],
                     ),
                   ),
                   
-                  // Add Player button
-                  Container(
-                    width: double.infinity,
-                    margin: EdgeInsets.symmetric(vertical: 8),
-                    child: ElevatedButton(
-                      onPressed: _showAddPlayerDialog,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('Add Player ▼', style: TextStyle(fontSize: 16)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  
-                  // Match Time
-                  Container(
-                    margin: EdgeInsets.symmetric(vertical: 8),
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppThemes.darkCardBackground : AppThemes.lightCardBackground,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Match Time: ${_formatTime(_matchTime ~/ 2)}',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: isDark ? AppThemes.darkText : AppThemes.lightText,
-                              ),
-                            ),
-                            Container(
-                              margin: EdgeInsets.only(left: 8),
-                              padding: EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.blue,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Text(
-                                appState.session.matchSegments == 2 
-                                  ? 'H${appState.session.currentPeriod}' 
-                                  : 'Q${appState.session.currentPeriod}',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
+                  // Match Time with positioned add button
+                  Stack(
+                    children: [
+                      // Match Time container
+                      Container(
+                        margin: EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppThemes.darkCardBackground : AppThemes.lightCardBackground,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        // Match duration progress bar
-                        if (appState.session.enableMatchDuration)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Container(
-                              height: 8,
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(4),
-                                color: isDark ? Colors.black38 : Colors.grey.shade300,
-                              ),
-                              child: FractionallySizedBox(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: ((_matchTime ~/ 2) / appState.session.matchDuration).clamp(0.0, 1.0),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _formatTime(_matchTime ~/ 2),
+                                  style: TextStyle(
+                                    fontSize: 42, // Larger font size
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Courier', // Monospace font for scoreboard look
+                                    color: _hasActivePlayer() && !_isPaused ? Colors.green : Colors.red, // Green when running, red when stopped
+                                    letterSpacing: 2.0, // Increased spacing for scoreboard look
+                                  ),
+                                ),
+                                Container(
+                                  margin: EdgeInsets.only(left: 8),
+                                  padding: EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    appState.session.matchSegments == 2 
+                                      ? 'H${appState.session.currentPeriod}' 
+                                      : 'Q${appState.session.currentPeriod}',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Match duration progress bar
+                            if (appState.session.enableMatchDuration)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
                                 child: Container(
+                                  height: 8,
+                                  width: double.infinity,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(4),
-                                    gradient: LinearGradient(
-                                      colors: [Colors.orange.shade600, Colors.deepOrange],
-                                      begin: Alignment.centerLeft,
-                                      end: Alignment.centerRight,
+                                    color: isDark ? Colors.black38 : Colors.grey.shade300,
+                                  ),
+                                  child: FractionallySizedBox(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor: ((_matchTime ~/ 2) / appState.session.matchDuration).clamp(0.0, 1.0),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(4),
+                                        gradient: LinearGradient(
+                                          colors: [Colors.orange.shade600, Colors.deepOrange],
+                                          begin: Alignment.centerLeft,
+                                          end: Alignment.centerRight,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Small add button in the bottom right
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _showAddPlayerDialog,
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: (isDark ? AppThemes.darkSecondaryBlue : AppThemes.lightSecondaryBlue).withOpacity(0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.add,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
                   
                   // Container for both player buttons and table
@@ -351,6 +578,7 @@ class _MainScreenState extends State<MainScreen> {
                               padding: EdgeInsets.all(8),
                               itemCount: appState.players.length,
                               itemBuilder: (context, index) {
+                                // Players are already sorted alphabetically in AppState
                                 final player = appState.players[index];
                                 final playerName = player['name'];
                                 final playerObj = appState.session.players[playerName];
@@ -363,78 +591,94 @@ class _MainScreenState extends State<MainScreen> {
                                     : isDark ? AppThemes.darkRed : AppThemes.lightRed;
                                 
                                 return Container(
+                                  key: ValueKey(playerName),
                                   margin: EdgeInsets.symmetric(vertical: 4),
                                   decoration: BoxDecoration(
                                     color: backgroundColor,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: InkWell(
-                                    onTap: () => _toggleTimer(index),
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Column(
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.all(16.0),
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Text(
-                                                player['name'],
-                                                style: TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                              Container(
-                                                padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black38,
-                                                  borderRadius: BorderRadius.circular(16),
-                                                ),
-                                                child: Text(
-                                                  _formatTime(playerTime),
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.white,
+                                  child: MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    child: GestureDetector(
+                                      onLongPress: () {
+                                        _showPlayerContextMenu(context, playerName, index);
+                                      },
+                                      // Prevent default context menu in web browsers
+                                      onSecondaryTapDown: (details) {
+                                        _showPlayerContextMenu(context, playerName, index);
+                                        // This prevents the default browser context menu
+                                      },
+                                      child: InkWell(
+                                        onTap: () => _togglePlayerByName(playerName),
+                                        // Disable this as we're handling it with onSecondaryTapDown
+                                        onSecondaryTap: null,
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Column(
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(16.0),
+                                              child: Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Text(
+                                                    player['name'],
+                                                    style: TextStyle(
+                                                      fontSize: 18,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Colors.white,
+                                                    ),
                                                   ),
-                                                ),
+                                                  Container(
+                                                    padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black38,
+                                                      borderRadius: BorderRadius.circular(16),
+                                                    ),
+                                                    child: Text(
+                                                      _formatTime(playerTime),
+                                                      style: TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        
-                                        // Target duration progress bar
-                                        if (appState.session.enableTargetDuration)
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                                            child: Container(
-                                              height: 6,
-                                              width: double.infinity,
-                                              decoration: BoxDecoration(
-                                                borderRadius: BorderRadius.circular(3),
-                                                color: Colors.black38,
-                                              ),
-                                              child: FractionallySizedBox(
-                                                alignment: Alignment.centerLeft,
-                                                widthFactor: (playerTime / appState.session.targetPlayDuration).clamp(0.0, 1.0),
+                                            ),
+                                            
+                                            // Target duration progress bar
+                                            if (appState.session.enableTargetDuration)
+                                              Padding(
+                                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                                                 child: Container(
+                                                  height: 6,
+                                                  width: double.infinity,
                                                   decoration: BoxDecoration(
                                                     borderRadius: BorderRadius.circular(3),
-                                                    gradient: LinearGradient(
-                                                      colors: playerTime >= appState.session.targetPlayDuration
-                                                        ? [Colors.yellow.shade600, Colors.amber]
-                                                        : [Colors.lightBlue.shade300, Colors.blue],
-                                                      begin: Alignment.centerLeft,
-                                                      end: Alignment.centerRight,
+                                                    color: Colors.black38,
+                                                  ),
+                                                  child: FractionallySizedBox(
+                                                    alignment: Alignment.centerLeft,
+                                                    widthFactor: (playerTime / appState.session.targetPlayDuration).clamp(0.0, 1.0),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        borderRadius: BorderRadius.circular(3),
+                                                        gradient: LinearGradient(
+                                                          colors: playerTime >= appState.session.targetPlayDuration
+                                                            ? [Colors.yellow.shade600, Colors.amber]
+                                                            : [Colors.lightBlue.shade300, Colors.blue],
+                                                          begin: Alignment.centerLeft,
+                                                          end: Alignment.centerRight,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                          ),
-                                      ],
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 );
@@ -533,8 +777,22 @@ class _MainScreenState extends State<MainScreen> {
                                       };
                                     }).toList();
                                     
-                                    // Sort by time descending
-                                    sortedPlayers.sort((a, b) => (b['time'] as int).compareTo(a['time'] as int));
+                                    // Sort by time descending, then alphabetically for ties
+                                    sortedPlayers.sort((a, b) {
+                                      // First sort by time descending
+                                      final int aTime = a['time'] as int;
+                                      final int bTime = b['time'] as int;
+                                      
+                                      // Only consider times different if they differ by more than 1 second
+                                      // This prevents reordering when times are very close
+                                      if ((bTime - aTime).abs() > 1) {
+                                        return bTime.compareTo(aTime);
+                                      }
+                                      
+                                      // If times are very close, maintain the original order (by index)
+                                      // This creates stability in the sort
+                                      return (a['index'] as int).compareTo(b['index'] as int);
+                                    });
                                     
                                     return Table(
                                       columnWidths: {
@@ -585,17 +843,42 @@ class _MainScreenState extends State<MainScreen> {
                     ),
                   ),
                   
-                  // Action buttons
+                  // Action buttons in 2x2 grid
+                  SizedBox(height: 8),
                   Row(
                     children: [
+                      // Pause button
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: _pauseAll,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark ? AppThemes.darkPauseButton : AppThemes.lightPauseButton,
-                            padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: ElevatedButton(
+                            onPressed: _pauseAll,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isDark ? AppThemes.darkPauseButton : AppThemes.lightPauseButton,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text(_isPaused ? 'Resume' : 'Pause'),
                           ),
-                          child: Text(_isPaused ? 'Resume' : 'Pause'),
+                        ),
+                      ),
+                      // Settings button
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: ElevatedButton(
+                            onPressed: () {
+                              // Show settings screen
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => SettingsScreen()),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isDark ? AppThemes.darkSettingsButton : AppThemes.lightSettingsButton,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text('Settings'),
+                          ),
                         ),
                       ),
                     ],
@@ -603,52 +886,84 @@ class _MainScreenState extends State<MainScreen> {
                   SizedBox(height: 8),
                   Row(
                     children: [
+                      // Reset button with confirmation
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            // Show settings screen
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (context) => SettingsScreen()),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark ? AppThemes.darkSettingsButton : AppThemes.lightSettingsButton,
-                            padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: ElevatedButton(
+                            onPressed: () {
+                              // Show confirmation dialog
+                              showDialog(
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    title: Text('Reset Match'),
+                                    content: Text('Are you sure you want to reset all timers?'),
+                                    actions: [
+                                      TextButton(
+                                        child: Text('Cancel'),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                        },
+                                      ),
+                                      TextButton(
+                                        child: Text('Reset'),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                          _resetAll();
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isDark ? AppThemes.darkResetButton : AppThemes.lightResetButton,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text('Reset'),
                           ),
-                          child: Text('Settings'),
                         ),
                       ),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                  Row(
-                    children: [
+                      // Exit button with confirmation
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: _resetAll,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark ? AppThemes.darkResetButton : AppThemes.lightResetButton,
-                            padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: ElevatedButton(
+                            onPressed: () {
+                              // Show confirmation dialog
+                              showDialog(
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    title: Text('Exit Match'),
+                                    content: Text('Are you sure you want to exit this match?'),
+                                    actions: [
+                                      TextButton(
+                                        child: Text('Cancel'),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                        },
+                                      ),
+                                      TextButton(
+                                        child: Text('Exit'),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                          Navigator.of(context).pushReplacementNamed('/');
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isDark ? AppThemes.darkExitButton : AppThemes.lightExitButton,
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text('Exit'),
                           ),
-                          child: Text('Reset'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).pushReplacementNamed('/');
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark ? AppThemes.darkExitButton : AppThemes.lightExitButton,
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          child: Text('Exit'),
                         ),
                       ),
                     ],
@@ -677,7 +992,7 @@ class _MainScreenState extends State<MainScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'MATCH PAUSED',
+                        'Match Paused',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 28,
@@ -695,7 +1010,7 @@ class _MainScreenState extends State<MainScreen> {
                           ),
                         ),
                         child: Text(
-                          'RESUME',
+                          'Resume',
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
