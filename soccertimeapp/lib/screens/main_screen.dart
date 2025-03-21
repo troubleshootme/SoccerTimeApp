@@ -466,10 +466,12 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         child: Column(
                           children: [
-                            Stack(
-                              alignment: Alignment.topRight, // Align period indicator to top right
+                            // Using Row with centered subcontainer instead of Stack
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Center(
+                                // Match timer in its own centered subcontainer
+                                Container(
                                   child: Text(
                                     _formatTime(_matchTime ~/ 2),
                                     style: TextStyle(
@@ -481,7 +483,9 @@ class _MainScreenState extends State<MainScreen> {
                                     ),
                                   ),
                                 ),
+                                // Period indicator as a separate element next to the timer
                                 Container(
+                                  margin: EdgeInsets.only(left: 8, top: 4),
                                   padding: EdgeInsets.all(4),
                                   decoration: BoxDecoration(
                                     color: Colors.blue,
