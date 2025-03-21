@@ -514,13 +514,8 @@ class _MainScreenState extends State<MainScreen> {
                           ),
                           child: _isTableExpanded 
                             ? SingleChildScrollView(
-                                child: Table(
-                                  columnWidths: {
-                                    0: FlexColumnWidth(2),
-                                    1: FlexColumnWidth(1),
-                                  },
-                                  children: [
-                                    // Table headers are now in the clickable header above, so we don't need them here
+                                child: Builder(
+                                  builder: (context) {
                                     // Get all players with their times
                                     final sortedPlayers = appState.players.map((player) {
                                       final playerName = player['name'];
@@ -531,7 +526,7 @@ class _MainScreenState extends State<MainScreen> {
                                       
                                       return {
                                         'player': player,
-                                        'name': playerName,
+                                        'name': playerName as String,
                                         'time': playerTime,
                                         'active': isActive,
                                         'index': index,
@@ -539,44 +534,49 @@ class _MainScreenState extends State<MainScreen> {
                                     }).toList();
                                     
                                     // Sort by time descending
-                                    sortedPlayers.sort((a, b) => b['time']!.compareTo(a['time']!));
+                                    sortedPlayers.sort((a, b) => (b['time'] as int).compareTo(a['time'] as int));
                                     
-                                    return sortedPlayers.map((item) {
-                                      final player = item['player'] as Map<String, dynamic>;
-                                      final playerName = item['name'] as String;
-                                      final playerTime = item['time'] as int;
-                                      final isActive = item['active'] as bool;
-                                      final index = item['index'] as int;
-                                      
-                                      return TableRow(
-                                        decoration: BoxDecoration(
-                                          color: isActive
-                                              ? (isDark ? Colors.green.withOpacity(0.3) : Colors.green.withOpacity(0.1))
-                                              : (index % 2 == 0 ? null : (isDark ? Colors.black12 : Colors.grey[100])),
-                                        ),
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.all(8.0),
-                                            child: Text(
-                                              playerName,
-                                              style: TextStyle(
-                                                color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                    return Table(
+                                      columnWidths: {
+                                        0: FlexColumnWidth(2),
+                                        1: FlexColumnWidth(1),
+                                      },
+                                      children: sortedPlayers.map((item) {
+                                        final playerName = item['name'] as String;
+                                        final playerTime = item['time'] as int;
+                                        final isActive = item['active'] as bool;
+                                        final index = item['index'] as int;
+                                        
+                                        return TableRow(
+                                          decoration: BoxDecoration(
+                                            color: isActive
+                                                ? (isDark ? Colors.green.withOpacity(0.3) : Colors.green.withOpacity(0.1))
+                                                : (index % 2 == 0 ? null : (isDark ? Colors.black12 : Colors.grey[100])),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(8.0),
+                                              child: Text(
+                                                playerName,
+                                                style: TextStyle(
+                                                  color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.all(8.0),
-                                            child: Text(
-                                              _formatTime(playerTime),
-                                              style: TextStyle(
-                                                color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                            Padding(
+                                              padding: const EdgeInsets.all(8.0),
+                                              child: Text(
+                                                _formatTime(playerTime),
+                                                style: TextStyle(
+                                                  color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      );
-                                    }).toList(),
-                                  ],
+                                          ],
+                                        );
+                                      }).toList(),
+                                    );
+                                  }
                                 ),
                               )
                             : SizedBox.shrink(),

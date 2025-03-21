@@ -66,6 +66,7 @@ class SessionDialog extends StatelessWidget {
         ),
         content: TextField(
           controller: controller,
+          autofocus: true,
           style: TextStyle(
             color: isDark ? AppThemes.darkText : AppThemes.lightText,
           ),
@@ -86,6 +87,14 @@ class SessionDialog extends StatelessWidget {
               ),
             ),
           ),
+          onSubmitted: (value) async {
+            if (value.isNotEmpty) {
+              final sessionId = await SessionDatabase.instance.insertSession(value);
+              onSessionSelected(sessionId);
+              Navigator.pop(context);
+              Navigator.pop(context);
+            }
+          },
         ),
         actions: [
           TextButton(
