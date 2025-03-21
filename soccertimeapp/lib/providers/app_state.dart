@@ -595,6 +595,9 @@ class AppState with ChangeNotifier {
       await SessionDatabase.instance.insertPlayer(_currentSessionId!, name, 0);
       _players = await SessionDatabase.instance.getPlayersForSession(_currentSessionId!);
       _players.sort((a, b) => a['name'].compareTo(b['name']));
+    } else {
+      // Preserve original behavior if no session (assumed)
+      _players.add({'name': name, 'timer_seconds': 0});
     }
     notifyListeners();
   }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/session_prompt_screen.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'providers/app_state.dart';
 import 'screens/main_screen.dart';
 
@@ -20,15 +19,6 @@ class SoccerTimeApp extends StatelessWidget {
     return Consumer<AppState>(
       builder: (context, appState, child) {
         return MaterialApp(
-          builder: (context, child) {
-            final mediaQuery = MediaQuery.of(context);
-            return MediaQuery(
-              data: mediaQuery.copyWith(
-                textScaler: TextScaler.linear(kIsWeb ? 1.0 : mediaQuery.textScaleFactor),
-              ),
-              child: child!,
-            );
-          },
           title: 'SoccerTimeApp',
           theme: ThemeData(
             primarySwatch: Colors.blue,
