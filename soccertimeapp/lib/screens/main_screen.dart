@@ -116,7 +116,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _pauseAll() {
     final appState = Provider.of<AppState>(context, listen: false);
-    
+
     setState(() {
       _isPaused = !_isPaused;
       appState.session.isPaused = _isPaused;
@@ -157,7 +157,7 @@ class _MainScreenState extends State<MainScreen> {
   String _formatTime(int seconds) {
     int minutes = seconds ~/ 60;
     int remainingSeconds = seconds % 60;
-    return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
   void _showAddPlayerDialog() {
@@ -466,21 +466,22 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         child: Column(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                            Stack(
+                              alignment: Alignment.topRight, // Align period indicator to top right
                               children: [
-                                Text(
-                                  _formatTime(_matchTime ~/ 2),
-                                  style: TextStyle(
-                                    fontSize: 48, // Increased font size
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'RobotoMono', // Use a blocky font
-                                    color: _hasActivePlayer() && !_isPaused ? Colors.green : Colors.red, // Green when running, red when stopped
-                                    letterSpacing: 2.0, // Increased spacing for scoreboard look
+                                Center(
+                                  child: Text(
+                                    _formatTime(_matchTime ~/ 2),
+                                    style: TextStyle(
+                                      fontSize: 48, // Increased font size
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'RobotoMono', // Use a blocky font
+                                      color: _hasActivePlayer() && !_isPaused ? Colors.green : Colors.red, // Green when running, red when stopped
+                                      letterSpacing: 2.0, // Increased spacing for scoreboard look
+                                    ),
                                   ),
                                 ),
                                 Container(
-                                  margin: EdgeInsets.only(left: 8),
                                   padding: EdgeInsets.all(4),
                                   decoration: BoxDecoration(
                                     color: Colors.blue,
