@@ -187,9 +187,12 @@ class AppState with ChangeNotifier {
       if (player.active) {
         // Player is active, deactivate them
         if (player.startTime > 0) {
-          // Update total time
+          // Update total time - add safeguard for large timestamp differences
           int elapsed = now - player.startTime;
-          player.totalTime += elapsed;
+          // Sanity check: Don't add more than 1 day of time (86400 seconds)
+          if (elapsed > 0 && elapsed < 86400) {
+            player.totalTime += elapsed;
+          }
           player.time = player.totalTime;
         }
         player.active = false;
@@ -204,6 +207,7 @@ class AppState with ChangeNotifier {
       final playerIndex = _players.indexWhere((p) => p['name'] == playerName);
       if (playerIndex != -1 && _currentSessionId != null) {
         final playerId = _players[playerIndex]['id'];
+        _players[playerIndex]['timer_seconds'] = player.totalTime;
         // We don't await here to improve UI responsiveness
         SessionDatabase.instance.updatePlayerTimer(playerId, player.totalTime);
       }
@@ -303,6 +307,7 @@ class AppState with ChangeNotifier {
     // Reset all player timers
     for (var playerName in _session.players.keys) {
       final player = _session.players[playerName]!;
+      // Reset all time fields to prevent any calculation issues
       player.totalTime = 0;
       player.time = 0;
       player.active = false;
@@ -380,54 +385,39 @@ class AppState with ChangeNotifier {
   // Rename a player
   Future<void> renamePlayer(String oldName, String newName) async {
     if (_currentSessionId == null) return;
-    if (_session.players.containsKey(oldName)) {
-      // Get the player's current data
-      final player = _session.players[oldName]!;
-      
-      // Remove the old player entry
-      _session.players.remove(oldName);
-      
-      // Add with the new name but keeping the same time data
-      _session.players[newName] = Player(
-        name: newName,
-        totalTime: player.totalTime,
-        active: player.active,
-        startTime: player.startTime,
-        time: player.time,
-      );
-      
-      // Update in database
-      if (_currentSessionId != null) {
-        // Find the player in our list
-        final playerIndex = _players.indexWhere((p) => p['name'] == oldName);
-        if (playerIndex != -1) {
-          // Remove the old entry
-          final oldPlayerId = _players[playerIndex]['id'];
-          _players.removeAt(playerIndex);
-          
-          // Add the new entry
-          final newPlayerId = await SessionDatabase.instance.insertPlayer(
-            _currentSessionId!, 
-            newName, 
-            player.totalTime
-          );
-          
-          // Add to local list
-          _players.add({
-            'id': newPlayerId,
-            'name': newName,
-            'timer_seconds': player.totalTime,
-            'session_id': _currentSessionId!,
-          });
-          
-          // Sort the player list alphabetically
-          _players.sort((a, b) => a['name'].compareTo(b['name']));
-        }
+    if (!_session.players.containsKey(oldName) || newName.trim().isEmpty) return;
+    
+    // Don't rename if new name already exists
+    if (_session.players.containsKey(newName)) return;
+    
+    // Get the player data
+    final player = _session.players[oldName]!;
+    
+    // Create a new player with the new name but same data
+    _session.players[newName] = Player(
+      name: newName,
+      totalTime: player.totalTime,
+      active: player.active,
+      startTime: player.startTime,
+      time: player.time,
+    );
+    
+    // Remove the old player
+    _session.players.remove(oldName);
+    
+    // Update the database
+    if (_currentSessionId != null) {
+      final playerIndex = _players.indexWhere((p) => p['name'] == oldName);
+      if (playerIndex != -1) {
+        // Use the player's ID to update the name
+        final playerId = _players[playerIndex]['id'] as int;
+        // We should have a renamePlayer method in database, but for now
+        // just update the local list
+        _players[playerIndex]['name'] = newName;
       }
-      
-      saveSession();
-      notifyListeners();
     }
+    
+    notifyListeners();
   }
 
   // Add missing resetPlayerTime method

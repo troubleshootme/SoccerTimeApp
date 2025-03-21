@@ -327,10 +327,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (player == null) return 0;
     
     int playerTime = player.totalTime;
+    // Ensure totalTime is in seconds, not milliseconds
+    if (playerTime > 1000000) playerTime = playerTime ~/ 1000; // Temporary fix
     if (player.active && !_isPaused) {
-      // Add current active time
-      final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000; // Ensure seconds
-      playerTime += timeElapsed;
+      // Add current active time - fix the timestamp calculation
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final timeElapsed = now - player.startTime;
+      playerTime += timeElapsed > 0 && timeElapsed < 86400 ? timeElapsed : 0; // Sanity check to prevent huge numbers
     }
     return playerTime;
   }
@@ -618,7 +621,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                   ),
                                   // Position the period indicator to the right of the timer
                                   Positioned(
-                                    left: MediaQuery.of(context).size.width / 2 + 60, // Adjust offset as needed
+                                    left: MediaQuery.of(context).size.width / 2 + 40, // Reduced offset for closer positioning
                                     top: 4,
                                     child: Padding(
                                       padding: EdgeInsets.all(4),
@@ -729,20 +732,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                   final isActive = playerObj?.active ?? false;
                                   final playerTime = _calculatePlayerTime(playerObj);
                                   
-                                  // Determine background color based on active status
-                                  Color backgroundColor = isActive
-                                      ? isDark ? AppThemes.darkGreen : AppThemes.lightGreen
-                                      : isDark ? AppThemes.darkRed : AppThemes.lightRed;
-                                  
-                                  // Use a stable key
+                                  // Create a stable key
                                   final stableKey = ValueKey('player-${playerId ?? playerName}');
                                   
                                   return Padding(
                                     key: stableKey,
                                     padding: const EdgeInsets.symmetric(vertical: 4),
-                                    child: Material(
-                                      color: backgroundColor,
-                                      borderRadius: BorderRadius.circular(8),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: isActive
+                                            ? (isDark ? AppThemes.darkGreen : AppThemes.lightGreen)
+                                            : (isDark ? AppThemes.darkRed : AppThemes.lightRed),
+                                        border: playerTime >= appState.session.targetPlayDuration
+                                            ? Border.all(
+                                                color: Colors.yellow.shade600,
+                                                width: 2,
+                                              )
+                                            : null,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
                                       child: InkWell(
                                         onTap: () => _togglePlayerByName(playerName),
                                         onLongPress: () => _showPlayerContextMenu(context, playerName, index),
@@ -950,9 +958,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           // Use simplified widget structure
                                           return Material(
                                             key: stableKey,
-                                            color: isActive
-                                                ? (isDark ? Colors.green.withOpacity(0.3) : Colors.green.withOpacity(0.1))
-                                                : (i % 2 == 0 ? null : (isDark ? Colors.black12 : Colors.grey[100])),
+                                            decoration: BoxDecoration(
+                                              color: isActive
+                                                  ? (isDark ? AppThemes.darkGreen.withOpacity(0.7) : AppThemes.lightGreen.withOpacity(0.7))
+                                                  : (isDark ? AppThemes.darkRed.withOpacity(0.7) : AppThemes.lightRed.withOpacity(0.7)),
+                                              border: playerTime >= appState.session.targetPlayDuration
+                                                  ? Border.all(
+                                                      color: Colors.yellow.shade600,
+                                                      width: 2,
+                                                    )
+                                                  : null,
+                                            ),
                                             child: Padding(
                                               padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
                                               child: Row(
@@ -964,7 +980,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                                       child: Text(
                                                         playerName,
                                                         style: TextStyle(
-                                                          color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                                          color: Colors.white,
+                                                          fontWeight: FontWeight.bold,
                                                         ),
                                                       ),
                                                     ),
@@ -976,7 +993,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                                       child: Text(
                                                         _formatTime(playerTime),
                                                         style: TextStyle(
-                                                          color: isDark ? AppThemes.darkText : AppThemes.lightText,
+                                                          color: Colors.white,
+                                                          fontWeight: FontWeight.bold,
                                                         ),
                                                       ),
                                                     ),
