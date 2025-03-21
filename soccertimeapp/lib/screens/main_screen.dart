@@ -126,7 +126,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       
       if (!_isPaused && hasActivePlayer && mounted) {
         setState(() {
-          _matchTime++;
+          if (mounted) _matchTime++;
           // Only update the session match time every second (every other timer tick)
           if (_matchTime % 2 == 0) {
             final seconds = _matchTime ~/ 2;
@@ -243,6 +243,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        key: UniqueKey(),
         title: Text('Add Player'),
         content: TextField(
           controller: textController,
@@ -258,8 +259,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 // Close dialog and update state
                 if (context.mounted) {
                   Navigator.pop(context);
-                  // Force rebuild to ensure UI is updated with new player
-                  setState(() {});
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _safeSetState(() {});
+                  });
                   
                   // Reopen dialog for quick adding of multiple players
                   Future.delayed(Duration(milliseconds: 100), () {
@@ -268,10 +270,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 }
               } catch (e) {
                 print('Error adding player: $e');
-                // Show error message but keep dialog open
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not add player: $e'))
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not add player: $e'))
+                  );
+                }
               }
             }
           },
@@ -291,15 +294,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   // Close dialog and update state
                   if (context.mounted) {
                     Navigator.pop(context);
-                    // Force rebuild to ensure UI is updated with new player
-                    setState(() {});
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _safeSetState(() {});
+                    });
                   }
                 } catch (e) {
                   print('Error adding player: $e');
-                  // Show error message but keep dialog open
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Could not add player: $e'))
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Could not add player: $e'))
+                    );
+                  }
                 }
               }
             },
@@ -307,10 +312,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-    ).then((_) {
-      // Clear the text controller when dialog is closed
-      textController.dispose();
-    });
+    ).then((_) => null);
   }
 
   // Toggle expansion state of the player table
@@ -327,7 +329,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     int playerTime = player.totalTime;
     if (player.active && !_isPaused) {
       // Add current active time
-      final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000;
+      final timeElapsed = (DateTime.now().millisecondsSinceEpoch - player.startTime) ~/ 1000; // Ensure seconds
       playerTime += timeElapsed;
     }
     return playerTime;
@@ -597,12 +599,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           ),
                           child: Column(
                             children: [
-                              // Using Row with centered subcontainer instead of Stack
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                              // Stack to separate timer centering and period positioning
+                              Stack(
+                                alignment: Alignment.center,
                                 children: [
-                                  // Match timer in its own centered subcontainer
-                                  Container(
+                                  // Center the match timer independently
+                                  Center(
                                     child: Text(
                                       _formatTime(_matchTime ~/ 2),
                                       style: TextStyle(
@@ -614,21 +616,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                       ),
                                     ),
                                   ),
-                                  // Period indicator as a separate element next to the timer
-                                  Container(
-                                    margin: EdgeInsets.only(left: 8, top: 4),
-                                    padding: EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      appState.session.matchSegments == 2 
-                                        ? 'H${appState.session.currentPeriod}' 
-                                        : 'Q${appState.session.currentPeriod}',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
+                                  // Position the period indicator to the right of the timer
+                                  Positioned(
+                                    left: MediaQuery.of(context).size.width / 2 + 60, // Adjust offset as needed
+                                    top: 4,
+                                    child: Padding(
+                                      padding: EdgeInsets.all(4),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Text(
+                                          appState.session.matchSegments == 2 
+                                            ? 'H${appState.session.currentPeriod}' 
+                                            : 'Q${appState.session.currentPeriod}',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
