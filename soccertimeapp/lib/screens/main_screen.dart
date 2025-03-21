@@ -83,10 +83,6 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => appState.addPlayer('New Player'),
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }

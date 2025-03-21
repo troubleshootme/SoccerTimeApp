@@ -1,32 +1,17 @@
 name: soccertimeapp
-description: A Flutter app for tracking soccer player time.
+description: A new Flutter project.
+publish_to: 'none'
 version: 1.0.0+1
-
 environment:
-  sdk: ">=2.17.0 <3.0.0"
-
+  sdk: ">=2.12.0 <3.0.0"
 dependencies:
   flutter:
     sdk: flutter
-  http: ^1.1.0          # For HTTP requests to session_handler.php
-  path_provider: ^2.1.1  # For file storage (sessions, backups)
-  csv: ^5.0.1           # Ensure this dependency is present for CSV export
-  # file_picker: ^5.3.3   # Temporarily removed due to platform issues
   provider: ^6.0.0
-  shared_preferences: ^2.2.2  # For storing settings (e.g., theme)
-  flutter_markdown: ^0.6.18  # For rendering MOTD
-  audioplayers: ^5.2.1  # For playing whistle sound
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.0
+  shared_preferences: ^2.2.3
   path: ^1.8.3
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-flutter:
-  uses-material-design: true
-  assets:
-    - assets/whistle.mp3  # Add the whistle sound file
-    - assets/motd.txt  # Added the MOTD asset
-    - assets/bcs-grad-logo.png

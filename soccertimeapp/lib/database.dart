@@ -1,12 +1,15 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
+import 'dart:convert';
 
 class SessionDatabase {
   static final SessionDatabase instance = SessionDatabase._init();
   static Database? _database;
+  static SharedPreferences? _prefs;
 
   SessionDatabase._init() {
     if (!kIsWeb) {
@@ -18,10 +21,17 @@ class SessionDatabase {
   }
 
   Future<Database> get database async {
-    if (kIsWeb) throw UnsupportedError('SQLite not supported on web; use mobile');
+    if (kIsWeb) {
+      throw UnsupportedError('SQLite not supported on web');
+    }
     if (_database != null) return _database!;
     _database = await _initDB('sessions.db');
     return _database!;
+  }
+
+  Future<SharedPreferences> get prefs async {
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
   }
 
   Future<Database> _initDB(String filePath) async {
@@ -81,8 +91,8 @@ class SessionDatabase {
     );
   }
 
-  Future close() async {
+  Future<void> close() async {
     final db = await database;
-    db.close();
+    await db.close();
   }
 }
