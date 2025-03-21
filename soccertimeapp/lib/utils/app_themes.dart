@@ -16,18 +16,18 @@ class AppThemes {
   static const Color darkExitButton = Color(0xFFE91E63);
   
   // Light theme colors (inverting most of the dark theme colors)
-  static const Color lightBackground = Colors.white;
-  static const Color lightPrimaryBlue = Color(0xFF3A5795);
-  static const Color lightSecondaryBlue = Color(0xFF254079);
-  static const Color lightGreen = Color(0xFF388E3C);
-  static const Color lightRed = Color(0xFFD32F2F);
+  static const Color lightBackground = Color(0xFFF5F5F5); // Off-white background
+  static const Color lightPrimaryBlue = Color(0xFF2C4A89); // Darker blue for better contrast
+  static const Color lightSecondaryBlue = Color(0xFF1D366A); // Even darker blue for secondary elements
+  static const Color lightGreen = Color(0xFF2E7D32); // Darker green for better contrast
+  static const Color lightRed = Color(0xFFC62828); // Darker red for better contrast
   static const Color lightButtonText = Colors.white;
   static const Color lightText = Colors.black87;
-  static const Color lightCardBackground = Color(0xFFF5F5F5);
-  static const Color lightPauseButton = Color(0xFF3F51B5);
-  static const Color lightSettingsButton = Color(0xFF673AB7);
-  static const Color lightResetButton = Color(0xFFFF5722);
-  static const Color lightExitButton = Color(0xFFE91E63);
+  static const Color lightCardBackground = Color(0xFFEAEAEA); // Light gray card background
+  static const Color lightPauseButton = Color(0xFF303F9F); // Darker indigo for better contrast
+  static const Color lightSettingsButton = Color(0xFF5E35B1); // Darker purple for better contrast
+  static const Color lightResetButton = Color(0xFFE64A19); // Darker orange for better contrast
+  static const Color lightExitButton = Color(0xFFD81B60); // Darker pink for better contrast
 
   static ThemeData darkTheme() {
     return ThemeData(

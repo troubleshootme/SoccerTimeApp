@@ -104,6 +104,7 @@ class PlayerButton extends StatelessWidget {
                       fontSize: kIsWeb ? 20 : 24,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
+                      letterSpacing: 1.5,
                     ),
                   ),
                   Container(
@@ -125,6 +126,7 @@ class PlayerButton extends StatelessWidget {
                         fontSize: kIsWeb ? 20 : 24,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
+                        letterSpacing: 1.2,
                       ),
                     ),
                   ),

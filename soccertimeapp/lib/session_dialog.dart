@@ -5,6 +5,7 @@ import 'models/session.dart';
 import 'utils/app_themes.dart';
 import 'package:provider/provider.dart';
 import 'providers/app_state.dart';
+import 'utils/backup_manager.dart';
 
 class SessionDialog extends StatefulWidget {
   final Function(int sessionId) onSessionSelected;
@@ -97,15 +98,82 @@ class _SessionDialogState extends State<SessionDialog> {
             Row(
               children: [
                 Expanded(
-                  child: ElevatedButton(
+                  child: ElevatedButton.icon(
                     onPressed: () => _showCreateSessionDialog(context),
                     style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 16),
                       backgroundColor: isDark ? AppThemes.darkSecondaryBlue : AppThemes.lightSecondaryBlue,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 2,
                     ),
-                    child: const Text('Create New Session'),
+                    icon: Icon(
+                      Icons.add_circle_outline,
+                      color: Colors.white,
+                    ),
+                    label: Text(
+                      'Create New Session',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _backupSessions(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      side: BorderSide(color: Colors.white.withOpacity(0.9), width: 1.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.transparent,
+                    ),
+                    icon: Icon(
+                      Icons.backup,
+                      color: Colors.white.withOpacity(0.9),
+                    ),
+                    label: Text(
+                      'Backup Sessions',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _restoreSessions(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      side: BorderSide(color: Colors.white.withOpacity(0.9), width: 1.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.transparent,
+                    ),
+                    icon: Icon(
+                      Icons.restore,
+                      color: Colors.white.withOpacity(0.9),
+                    ),
+                    label: Text(
+                      'Restore Sessions',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        letterSpacing: 1.5,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -114,8 +182,13 @@ class _SessionDialogState extends State<SessionDialog> {
             _buildSessionList(context),
             const SizedBox(height: 16),
             if (_sessions.isNotEmpty) 
-              TextButton.icon(
+              OutlinedButton.icon(
                 onPressed: () => _showClearAllSessionsDialog(context),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(color: Colors.red.shade400),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
                 icon: Icon(
                   Icons.delete_forever, 
                   color: Colors.red.shade400,
@@ -124,6 +197,7 @@ class _SessionDialogState extends State<SessionDialog> {
                   'Clear All Sessions',
                   style: TextStyle(
                     color: Colors.red.shade400,
+                    letterSpacing: 1.5,
                   ),
                 ),
               ),
@@ -221,6 +295,7 @@ class _SessionDialogState extends State<SessionDialog> {
                       'Cancel',
                       style: TextStyle(
                         color: isDark ? AppThemes.darkSecondaryBlue : AppThemes.lightSecondaryBlue,
+                        letterSpacing: 1.0,
                       ),
                     )
                   ),
@@ -232,7 +307,12 @@ class _SessionDialogState extends State<SessionDialog> {
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('Create'),
+                    child: const Text(
+                      'Create',
+                      style: TextStyle(
+                        letterSpacing: 1.0,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -301,12 +381,14 @@ class _SessionDialogState extends State<SessionDialog> {
           'Clear All Sessions',
           style: TextStyle(
             color: isDark ? AppThemes.darkText : AppThemes.lightText,
+            letterSpacing: 1.0,
           ),
         ),
         content: Text(
           'Are you sure you want to delete all sessions? This action cannot be undone.',
           style: TextStyle(
             color: isDark ? AppThemes.darkText : AppThemes.lightText,
+            letterSpacing: 0.5,
           ),
         ),
         actions: [
@@ -316,6 +398,7 @@ class _SessionDialogState extends State<SessionDialog> {
               'Cancel',
               style: TextStyle(
                 color: isDark ? AppThemes.darkSecondaryBlue : AppThemes.lightSecondaryBlue,
+                letterSpacing: 1.0,
               ),
             ),
           ),
@@ -467,5 +550,64 @@ class _SessionDialogState extends State<SessionDialog> {
         ],
       ),
     );
+  }
+
+  // Implement backup sessions method
+  Future<void> _backupSessions(BuildContext context) async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+      
+      final filePath = await BackupManager().backupSessions(context);
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (filePath != null) {
+        BackupManager().showBackupSuccess(context, filePath);
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print('Error during backup: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error during backup: $e')),
+      );
+    }
+  }
+  
+  // Implement restore sessions method
+  Future<void> _restoreSessions(BuildContext context) async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+      
+      final success = await BackupManager().restoreSessions(context);
+      
+      if (success) {
+        // Reload sessions list after restore
+        await _loadSessions();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sessions restored successfully')),
+        );
+      }
+      
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print('Error during restore: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error during restore: $e')),
+      );
+    }
   }
 }
