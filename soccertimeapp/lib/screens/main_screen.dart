@@ -381,6 +381,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       appState.session.hasWhistlePlayed = false;
                       _isPaused = false;
                       appState.session.isPaused = false;
+                      
+                      // Reactivate players that were active before pause
+                      for (var playerName in appState.session.activeBeforePause) {
+                        if (appState.session.players.containsKey(playerName)) {
+                          appState.togglePlayer(playerName);
+                        }
+                      }
+                      // Clear the list after reactivating
+                      appState.session.activeBeforePause = [];
                     });
                     Navigator.of(dialogContext).pop();
                   }
@@ -621,11 +630,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                   ),
                                   // Position the period indicator to the right of the timer
                                   Positioned(
-                                    left: MediaQuery.of(context).size.width / 2 + 40, // Reduced offset for closer positioning
+                                    left: MediaQuery.of(context).size.width / 2 + 50, // Increased offset for better positioning
                                     top: 4,
                                     child: Padding(
                                       padding: EdgeInsets.all(4),
                                       child: Container(
+                                        padding: EdgeInsets.all(4),
                                         decoration: BoxDecoration(
                                           color: Colors.blue,
                                           shape: BoxShape.circle,
@@ -636,7 +646,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                             : 'Q${appState.session.currentPeriod}',
                                           style: TextStyle(
                                             color: Colors.white,
-                                            fontSize: 12,
+                                            fontSize: 14, // Increased font size
                                           ),
                                         ),
                                       ),
@@ -745,8 +755,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                             : (isDark ? AppThemes.darkRed : AppThemes.lightRed),
                                         border: playerTime >= appState.session.targetPlayDuration
                                             ? Border.all(
-                                                color: Colors.yellow.shade600,
-                                                width: 2,
+                                                color: Colors.yellow.shade600.withOpacity(0.6), // More subtle yellow color
+                                                width: 1.5, // Thinner border
                                               )
                                             : null,
                                         borderRadius: BorderRadius.circular(8),
@@ -956,7 +966,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           final stableKey = ValueKey('table-${playerId ?? playerName}');
                                           
                                           // Use simplified widget structure
-                                          return Material(
+                                          return Container(
                                             key: stableKey,
                                             decoration: BoxDecoration(
                                               color: isActive
@@ -964,8 +974,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                                   : (isDark ? AppThemes.darkRed.withOpacity(0.7) : AppThemes.lightRed.withOpacity(0.7)),
                                               border: playerTime >= appState.session.targetPlayDuration
                                                   ? Border.all(
-                                                      color: Colors.yellow.shade600,
-                                                      width: 2,
+                                                      color: Colors.yellow.shade600.withOpacity(0.6), // More subtle yellow color
+                                                      width: 1.5, // Thinner border
                                                     )
                                                   : null,
                                             ),
