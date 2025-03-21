@@ -472,9 +472,9 @@ class _MainScreenState extends State<MainScreen> {
                                 Text(
                                   _formatTime(_matchTime ~/ 2),
                                   style: TextStyle(
-                                    fontSize: 42, // Larger font size
+                                    fontSize: 48, // Increased font size
                                     fontWeight: FontWeight.bold,
-                                    fontFamily: 'Courier', // Monospace font for scoreboard look
+                                    fontFamily: 'RobotoMono', // Use a blocky font
                                     color: _hasActivePlayer() && !_isPaused ? Colors.green : Colors.red, // Green when running, red when stopped
                                     letterSpacing: 2.0, // Increased spacing for scoreboard look
                                   ),
