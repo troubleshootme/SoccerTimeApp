@@ -13,68 +13,91 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'hive_database.dart';
 import 'dart:async';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 // Single global instance for error tracking
 final _errorHandler = ErrorHandler();
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  // Set preferred orientation to portrait
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  
-  // Configure status bar color
-  SystemChrome.setSystemUIOverlayStyle(
-    SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.black,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
-  
-  // Initialize directory for databases and files
-  try {
-    if (!kIsWeb) {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      await Directory('${appDocDir.path}/sessions').create(recursive: true);
-    }
-  } catch (e) {
-    print('Error creating app directory: $e');
-  }
-  
-  // Initialize Hive database
-  try {
-    await HiveSessionDatabase.instance.init();
-    print('Hive database initialized successfully');
-  } catch (e) {
-    print('Error initializing database: $e');
-  }
-  
-  // Set up global error handlers first
-  FlutterError.onError = _errorHandler.handleFlutterError;
-  PlatformDispatcher.instance.onError = _errorHandler.handlePlatformError;
-  
-  // Handle platform-specific concerns
-  if (Platform.isAndroid) {
-    // Configure UI mode
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, 
-      overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom]);
-  }
-  
-  // Run the app
-  runApp(
-    // Wrap everything in an error boundary
-    ErrorBoundaryWidget(
-      child: ChangeNotifierProvider(
-        create: (context) => AppState(),
-        child: SoccerTimeApp(),
+// Global variables for initialization error handling
+bool hasInitializationError = false;
+String errorMessage = '';
+
+void main() {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    
+    // Set preferred orientation to portrait
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    
+    // Configure status bar color
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.black,
+        systemNavigationBarIconBrightness: Brightness.light,
       ),
-    ),
-  );
+    );
+    
+    // Initialize directory for databases and files
+    try {
+      if (!kIsWeb) {
+        final appDocDir = await getApplicationDocumentsDirectory();
+        await Directory('${appDocDir.path}/sessions').create(recursive: true);
+      }
+    } catch (e) {
+      print('Error creating app directory: $e');
+    }
+    
+    // Enable wakelock to keep the screen on when the app is active
+    try {
+      await WakelockPlus.enable();
+    } catch (e) {
+      print('Error enabling wakelock: $e');
+    }
+
+    try {
+      // Initialize Hive
+      await HiveSessionDatabase.instance.init();
+      print('Hive database initialized successfully');
+    } catch (e) {
+      print('Error initializing Hive: $e');
+      hasInitializationError = true;
+      errorMessage = e.toString();
+    }
+    
+    // Set up global error handlers first
+    FlutterError.onError = _errorHandler.handleFlutterError;
+    PlatformDispatcher.instance.onError = _errorHandler.handlePlatformError;
+    
+    // Handle platform-specific concerns
+    if (Platform.isAndroid) {
+      // Configure UI mode
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, 
+        overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom]);
+    }
+    
+    runApp(
+      // Wrap everything in an error boundary
+      ErrorBoundaryWidget(
+        child: ChangeNotifierProvider(
+          create: (context) => AppState(),
+          child: SoccerTimeApp(),
+        ),
+      ),
+    );
+  }, (error, stack) {
+    print('Uncaught error: $error');
+    print(stack);
+    
+    // Store the error for display
+    hasInitializationError = true;
+    errorMessage = error.toString();
+  });
 }
 
 // Centralized error handling
@@ -205,6 +228,25 @@ class _SoccerTimeAppState extends State<SoccerTimeApp> with WidgetsBindingObserv
     if (state == AppLifecycleState.paused) {
       // App is in background, close database to prevent locking
       HiveSessionDatabase.instance.close();
+      
+      // Don't disable wakelock to keep timers and audio running in background
+    } else if (state == AppLifecycleState.resumed) {
+      try {
+        // Re-enable wakelock when app is brought back to foreground
+        WakelockPlus.enable();
+      } catch (e) {
+        print('Error re-enabling wakelock: $e');
+      }
+      
+      // Reopen database connection
+      HiveSessionDatabase.instance.init();
+    } else if (state == AppLifecycleState.detached) {
+      // App is being terminated, disable wakelock
+      try {
+        WakelockPlus.disable();
+      } catch (e) {
+        print('Error disabling wakelock: $e');
+      }
     }
   }
 

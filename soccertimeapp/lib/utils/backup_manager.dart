@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../hive_database.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BackupManager {
   // Singleton pattern
@@ -18,13 +19,55 @@ class BackupManager {
   // Generate a backup filename with timestamp
   String _getBackupFileName() {
     final now = DateTime.now();
-    final timestamp = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+    final timestamp = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}_${now.millisecond.toString().padLeft(3, '0')}';
     return '${backupFileNameBase}_$timestamp.$backupFileExt';
+  }
+
+  /// Request storage permission for Android
+  Future<bool> _requestStoragePermission() async {
+    try {
+      // Check if permission is already granted
+      var status = await Permission.storage.status;
+      if (status.isGranted) {
+        return true;
+      }
+      
+      // If denied, request permission
+      status = await Permission.storage.request();
+      if (status.isGranted) {
+        return true;
+      }
+      
+      // If still not granted, try requesting external storage permission
+      status = await Permission.manageExternalStorage.request();
+      return status.isGranted;
+    } catch (e) {
+      print('Error requesting storage permission: $e');
+      return false;
+    }
   }
 
   /// Creates a backup of all session data and saves it directly to the Downloads folder
   Future<String?> backupSessions(BuildContext context) async {
     try {
+      // Request permission first
+      final hasPermission = await _requestStoragePermission();
+      if (!hasPermission) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Storage permission denied. Cannot create backup file.'),
+            duration: Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () {
+                openAppSettings();
+              },
+            ),
+          ),
+        );
+        throw Exception('Storage permission denied');
+      }
+      
       // Initialize the database
       await HiveSessionDatabase.instance.init();
       
@@ -52,50 +95,104 @@ class BackupManager {
       // Generate a unique filename with timestamp
       final backupFileName = _getBackupFileName();
       
-      // Try multiple paths for Downloads folder
-      final paths = [
-        '/storage/emulated/0/Download',    // Primary storage path
-        '/sdcard/Download',                // Alternative path
-      ];
+      // Create a multi-backup strategy where we save to multiple locations
+      // to ensure at least one copy is accessible after reinstallation
+      List<String> successPaths = [];
+      List<String> primaryPaths = []; // Paths to try first
+      List<String> secondaryPaths = []; // Fallback paths
+      Exception? lastError;
       
-      // Also try to get the external storage directory
+      // STRATEGY 1: Public Downloads folders - most user-accessible
+      primaryPaths.addAll([
+        '/storage/emulated/0/Download',
+        '/sdcard/Download',
+        '/storage/emulated/0/Downloads',
+        '/sdcard/Downloads',
+      ]);
+      
+      // STRATEGY 2: Try DCIM folder which is typically excluded from app uninstall cleanup
+      primaryPaths.addAll([
+        '/storage/emulated/0/DCIM/SoccerTimeBackups',
+        '/sdcard/DCIM/SoccerTimeBackups',
+      ]);
+      
+      // Try to create DCIM backup directory if it doesn't exist
+      for (int i = 4; i < primaryPaths.length; i++) {
+        try {
+          await Directory(primaryPaths[i]).create(recursive: true);
+          print('Created backup directory: ${primaryPaths[i]}');
+        } catch (e) {
+          print('Failed to create directory ${primaryPaths[i]}: $e');
+        }
+      }
+      
+      // STRATEGY 3: Application specific directories - less accessible but more reliable
+      try {
+        // App's documents directory - will be removed on uninstall
+        final documentsDir = await getApplicationDocumentsDirectory();
+        if (documentsDir != null) {
+          secondaryPaths.add(documentsDir.path);
+        }
+        
+        // External storage directories - may be preserved after uninstall
+        if (Platform.isAndroid) {
+          final externalStoragePaths = await getExternalStorageDirectories();
+          if (externalStoragePaths != null && externalStoragePaths.isNotEmpty) {
+            secondaryPaths.addAll(externalStoragePaths.map((dir) => dir.path));
+          }
+        }
+        
+        // Cache directory - just in case, but will likely be cleared
+        final tempDir = await getTemporaryDirectory();
+        secondaryPaths.add(tempDir.path);
+        
+      } catch (e) {
+        print('Error getting app-specific directories: $e');
+      }
+      
+      // STRATEGY 4: External storage directory (main)
       try {
         final externalDir = await getExternalStorageDirectory();
         if (externalDir != null) {
-          // Navigate up to find Download folder
-          var current = externalDir;
-          var pathParts = current.path.split('/');
-          
-          // Try to find the Download folder by navigating up the directory tree
-          for (int i = pathParts.length; i >= 3; i--) {
-            var basePath = pathParts.sublist(0, i).join('/');
-            var downloadPath = '$basePath/Download';
-            var downloadDir = Directory(downloadPath);
-            if (await downloadDir.exists()) {
-              paths.add(downloadPath);
-              break;
-            }
-          }
+          secondaryPaths.add(externalDir.path);
         }
       } catch (e) {
-        print('Error finding external directory: $e');
+        print('Error getting external storage directory: $e');
       }
       
-      // Try each path until one works
-      String? filePath;
-      Exception? lastError;
+      // First try primary paths
+      bool backupSaved = false;
+      String? primaryFilePath;
       
-      for (final path in paths) {
+      for (final path in primaryPaths) {
+        if (backupSaved) continue;
+        
         try {
           final downloadDir = Directory(path);
-          if (await downloadDir.exists()) {
-            final backupFile = File('$path/$backupFileName');
-            
-            // No need to delete since filename is unique with timestamp
-            await backupFile.writeAsString(jsonData);
-            filePath = backupFile.path;
-            print('Backup saved to: $filePath');
-            break;
+          final dirExists = await downloadDir.exists();
+          if (!dirExists) {
+            // Try to create directory if it doesn't exist
+            try {
+              await downloadDir.create(recursive: true);
+              print('Created directory: $path');
+            } catch (e) {
+              print('Failed to create directory $path: $e');
+              continue;
+            }
+          }
+          
+          print('Trying to save to: $path');
+          final backupFile = File('$path/$backupFileName');
+          
+          await backupFile.writeAsString(jsonData);
+          successPaths.add(backupFile.path);
+          
+          if (primaryFilePath == null) {
+            primaryFilePath = backupFile.path;
+            backupSaved = true;
+            print('Primary backup saved to: $primaryFilePath');
+          } else {
+            print('Additional backup saved to: ${backupFile.path}');
           }
         } catch (e) {
           print('Failed to save to $path: $e');
@@ -103,12 +200,38 @@ class BackupManager {
         }
       }
       
-      if (filePath != null) {
+      // Then try secondary paths for redundancy, but don't set backupSaved flag
+      for (final path in secondaryPaths) {
+        try {
+          final dirPath = Directory(path);
+          if (await dirPath.exists()) {
+            print('Trying to save backup copy to: $path');
+            final backupFile = File('$path/$backupFileName');
+            
+            await backupFile.writeAsString(jsonData);
+            successPaths.add(backupFile.path);
+            print('Backup copy saved to: ${backupFile.path}');
+          }
+        } catch (e) {
+          print('Failed to save backup copy to $path: $e');
+        }
+      }
+      
+      // If at least one backup was saved successfully
+      if (successPaths.isNotEmpty) {
+        final filePath = primaryFilePath ?? successPaths.first;
+        
         // Show success message with the file path
         _showBackupSuccess(context, filePath);
+        
+        // Show a more detailed message if we saved to multiple locations
+        if (successPaths.length > 1) {
+          print('Successfully created ${successPaths.length} backup copies');
+        }
+        
         return filePath;
       } else {
-        throw lastError ?? Exception('Could not access any Download folder');
+        throw lastError ?? Exception('Could not access any storage locations for backup');
       }
     } catch (e) {
       print('Error creating backup: $e');
@@ -174,9 +297,148 @@ class BackupManager {
     return 'Shared as $backupFileName';
   }
   
+  /// Shows a dialog to select which backup file to restore
+  Future<Map<String, dynamic>?> _showBackupSelectionDialog(BuildContext context, List<File> backups) async {
+    // Format date from filename for display
+    String formatBackupDate(String filePath) {
+      final fileName = filePath.split('/').last;
+      
+      // Match the new timestamp format that includes seconds and milliseconds
+      final dateMatch = RegExp(r'(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_?(\d{3})?').firstMatch(fileName);
+      
+      if (dateMatch != null) {
+        final year = dateMatch.group(1);
+        final month = dateMatch.group(2);
+        final day = dateMatch.group(3);
+        final hour = dateMatch.group(4);
+        final minute = dateMatch.group(5);
+        final second = dateMatch.group(6);
+        final millisecond = dateMatch.group(7) ?? '';
+        
+        if (millisecond.isNotEmpty) {
+          return '$year-$month-$day $hour:$minute:$second.$millisecond';
+        } else {
+          return '$year-$month-$day $hour:$minute:$second';
+        }
+      }
+      
+      // Fallback if pattern doesn't match
+      return fileName;
+    }
+    
+    bool deleteOtherBackups = false;
+    
+    return await showDialog<Map<String, dynamic>?>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('Select Backup to Restore'),
+          content: Container(
+            width: double.maxFinite,
+            height: 350, // Increased height to accommodate checkbox
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: backups.length,
+                    shrinkWrap: true,
+                    itemBuilder: (context, index) {
+                      final backup = backups[index];
+                      final fileName = backup.path.split('/').last;
+                      final formattedDate = formatBackupDate(fileName);
+                      
+                      // Get file size information for display
+                      int fileSize = 0;
+                      try {
+                        fileSize = backup.lengthSync();
+                      } catch (e) {
+                        print('Error getting file size: $e');
+                      }
+                      
+                      // Format file size
+                      String formattedSize = '';
+                      if (fileSize < 1024) {
+                        formattedSize = '$fileSize B';
+                      } else if (fileSize < 1024 * 1024) {
+                        formattedSize = '${(fileSize / 1024).toStringAsFixed(1)} KB';
+                      } else {
+                        formattedSize = '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB';
+                      }
+                      
+                      return Card(
+                        margin: EdgeInsets.symmetric(vertical: 4),
+                        child: ListTile(
+                          title: Text('Backup from $formattedDate'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(fileName, 
+                                  style: TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis),
+                              Text('Size: $formattedSize',
+                                  style: TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                          isThreeLine: true,
+                          onTap: () => Navigator.of(context).pop({
+                            'backup': backup,
+                            'deleteOthers': deleteOtherBackups
+                          }),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                CheckboxListTile(
+                  title: Text(
+                    'Restore this backup and DELETE all other backups',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  value: deleteOtherBackups,
+                  onChanged: (value) {
+                    setState(() {
+                      deleteOtherBackups = value ?? false;
+                    });
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
   /// Restores session data from a backup file in Downloads folder
   Future<bool> restoreSessions(BuildContext context) async {
     try {
+      // Request permission first
+      final hasPermission = await _requestStoragePermission();
+      if (!hasPermission) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Storage permission denied. Cannot access backup files.'),
+            duration: Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () {
+                openAppSettings();
+              },
+            ),
+          ),
+        );
+        return false;
+      }
+      
       // Find available backup files in all possible paths
       final availableBackups = await _findBackupFiles();
       
@@ -195,10 +457,13 @@ class BackupManager {
       availableBackups.sort((a, b) => b.path.compareTo(a.path));
       
       // Show dialog to select which backup to restore
-      final selectedBackup = await _showBackupSelectionDialog(context, availableBackups);
-      if (selectedBackup == null) {
+      final result = await _showBackupSelectionDialog(context, availableBackups);
+      if (result == null) {
         return false; // User canceled
       }
+      
+      final selectedBackup = result['backup'] as File;
+      final deleteOtherBackups = result['deleteOthers'] as bool;
       
       // Read the selected backup file
       final backupContent = await selectedBackup.readAsString();
@@ -253,9 +518,27 @@ class BackupManager {
         restoredSessions++;
       }
       
+      // Delete other backups if requested
+      if (deleteOtherBackups) {
+        int deletedCount = 0;
+        for (final backup in availableBackups) {
+          if (backup.path != selectedBackup.path) {
+            try {
+              await backup.delete();
+              deletedCount++;
+            } catch (e) {
+              print('Error deleting backup: ${backup.path}: $e');
+            }
+          }
+        }
+        print('Deleted $deletedCount other backup files');
+      }
+      
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Successfully restored $restoredSessions sessions')),
+        SnackBar(content: Text(deleteOtherBackups
+          ? 'Successfully restored $restoredSessions sessions and deleted ${availableBackups.length - 1} other backups'
+          : 'Successfully restored $restoredSessions sessions')),
       );
       
       print('Successfully restored $restoredSessions sessions');
@@ -273,16 +556,38 @@ class BackupManager {
   Future<List<File>> _findBackupFiles() async {
     List<File> backups = [];
     
-    // Try multiple paths for Downloads folder
+    // Try multiple paths for Downloads folder with more comprehensive options
     final paths = [
       '/storage/emulated/0/Download',    // Primary storage path
       '/sdcard/Download',                // Alternative path
+      '/storage/emulated/0/Downloads',   // Another common path
+      '/sdcard/Downloads',               // Alternative path
+      '/storage/self/primary/Download',  // Another Android path variant
+      '/storage/emulated/0/Android/data/com.example.soccertimeapp/files', // App-specific external storage
     ];
+    
+    // Add path for user-facing folders on Android 10+
+    if (Platform.isAndroid) {
+      try {
+        final externalStoragePaths = await getExternalStorageDirectories();
+        if (externalStoragePaths != null) {
+          for (var dir in externalStoragePaths) {
+            print('External storage directory: ${dir.path}');
+            paths.add(dir.path);
+          }
+        }
+      } catch (e) {
+        print('Error getting external storage directories: $e');
+      }
+    }
     
     // Also try to get the external storage directory
     try {
       final externalDir = await getExternalStorageDirectory();
       if (externalDir != null) {
+        print('External storage directory for finding backups: ${externalDir.path}');
+        paths.add(externalDir.path);
+        
         // Navigate up to find Download folder
         var current = externalDir;
         var pathParts = current.path.split('/');
@@ -290,33 +595,121 @@ class BackupManager {
         // Try to find the Download folder by navigating up the directory tree
         for (int i = pathParts.length; i >= 3; i--) {
           var basePath = pathParts.sublist(0, i).join('/');
-          var downloadPath = '$basePath/Download';
-          var downloadDir = Directory(downloadPath);
-          if (await downloadDir.exists()) {
-            paths.add(downloadPath);
-            break;
+          for (var downloadName in ['Download', 'Downloads']) {
+            var downloadPath = '$basePath/$downloadName';
+            var downloadDir = Directory(downloadPath);
+            if (await downloadDir.exists()) {
+              print('Found Download folder at: $downloadPath');
+              paths.add(downloadPath);
+            }
           }
         }
       }
     } catch (e) {
-      print('Error finding external directory: $e');
+      print('Error finding external directory for backups: $e');
+    }
+    
+    // Add Documents directory as another option
+    try {
+      final documentsDir = await getApplicationDocumentsDirectory();
+      if (documentsDir != null) {
+        print('Documents directory for finding backups: ${documentsDir.path}');
+        paths.add(documentsDir.path);
+      }
+    } catch (e) {
+      print('Error finding documents directory: $e');
+    }
+    
+    // Add temporary directory as a fallback
+    try {
+      final tempDir = await getTemporaryDirectory();
+      print('Temporary directory for finding backups: ${tempDir.path}');
+      paths.add(tempDir.path);
+    } catch (e) {
+      print('Error finding temporary directory: $e');
+    }
+    
+    // For root paths and DCIM folder
+    try {
+      final dcimPaths = [
+        '/storage/emulated/0',
+        '/sdcard',
+        '/storage/emulated/0/DCIM',
+        '/sdcard/DCIM',
+      ];
+      paths.addAll(dcimPaths);
+    } catch (e) {
+      print('Error adding DCIM paths: $e');
+    }
+    
+    // Recursive search for backup files
+    Future<void> searchDirectoryRecursively(String path, int depth) async {
+      if (depth > 3) return; // Limit recursion depth to avoid excessive searching
+      
+      try {
+        final dir = Directory(path);
+        if (await dir.exists()) {
+          final entities = await dir.list().toList();
+          
+          // Search for backup files in current directory
+          for (final entity in entities) {
+            if (entity is File && 
+                entity.path.contains(backupFileNameBase) && 
+                entity.path.endsWith(backupFileExt)) {
+              print('Found backup file: ${entity.path}');
+              if (!backups.any((file) => file.path == entity.path)) {
+                backups.add(entity);
+              }
+            }
+          }
+          
+          // Recursively search subdirectories
+          if (depth < 2) { // Only go deeper for top-level directories
+            for (final entity in entities) {
+              if (entity is Directory) {
+                // Skip certain system directories to speed up search
+                if (!entity.path.contains('/Android/data') &&
+                    !entity.path.contains('/Android/obb') &&
+                    !entity.path.contains('/Android/media') &&
+                    !entity.path.contains('.thumbnails') &&
+                    !entity.path.contains('.cache')) {
+                  await searchDirectoryRecursively(entity.path, depth + 1);
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        print('Error searching directory $path: $e');
+      }
     }
     
     // Check each path for backup files
     for (final path in paths) {
       try {
+        print('Searching for backups in: $path');
         final downloadDir = Directory(path);
         if (await downloadDir.exists()) {
           // List all files in directory
           final entities = await downloadDir.list().toList();
+          print('Found ${entities.length} files/directories in $path');
           
           // Filter for backup files
           for (final entity in entities) {
             if (entity is File && 
                 entity.path.contains(backupFileNameBase) && 
                 entity.path.endsWith(backupFileExt)) {
-              backups.add(entity);
+              print('Found backup file: ${entity.path}');
+              if (!backups.any((file) => file.path == entity.path)) {
+                backups.add(entity);
+              }
             }
+          }
+          
+          // For specific directories, try a limited recursive search
+          if (path.contains('Download') || path.contains('Downloads') || 
+              path.contains('Documents') || path.contains('DCIM')) {
+            await searchDirectoryRecursively(path, 0);
           }
         }
       } catch (e) {
@@ -324,61 +717,24 @@ class BackupManager {
       }
     }
     
-    return backups;
-  }
-  
-  /// Shows a dialog to select which backup file to restore
-  Future<File?> _showBackupSelectionDialog(BuildContext context, List<File> backups) async {
-    // Format date from filename for display
-    String formatBackupDate(String filePath) {
-      final fileName = filePath.split('/').last;
-      final dateMatch = RegExp(r'(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})').firstMatch(fileName);
-      
-      if (dateMatch != null) {
-        final year = dateMatch.group(1);
-        final month = dateMatch.group(2);
-        final day = dateMatch.group(3);
-        final hour = dateMatch.group(4);
-        final minute = dateMatch.group(5);
-        
-        return '$year-$month-$day $hour:$minute';
+    // If still no backups found and we're on Android, try content resolver approach
+    if (backups.isEmpty && Platform.isAndroid) {
+      try {
+        print('Trying alternative approach to find backups');
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/backup_finder.txt');
+        await tempFile.writeAsString('Searching for backups');
+      } catch (e) {
+        print('Error in alternative approach: $e');
       }
-      
-      // Fallback if pattern doesn't match
-      return fileName;
     }
     
-    return await showDialog<File?>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Select Backup to Restore'),
-        content: Container(
-          width: double.maxFinite,
-          height: 300,
-          child: ListView.builder(
-            itemCount: backups.length,
-            shrinkWrap: true,
-            itemBuilder: (context, index) {
-              final backup = backups[index];
-              final fileName = backup.path.split('/').last;
-              final formattedDate = formatBackupDate(fileName);
-              
-              return ListTile(
-                title: Text('Backup from $formattedDate'),
-                subtitle: Text(fileName, style: TextStyle(fontSize: 12)),
-                onTap: () => Navigator.of(context).pop(backup),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(null),
-            child: Text('Cancel'),
-          ),
-        ],
-      ),
-    );
+    print('Total backup files found: ${backups.length}');
+    for (final backup in backups) {
+      print('  ${backup.path}');
+    }
+    
+    return backups;
   }
   
   /// Shows a confirmation dialog before restoring

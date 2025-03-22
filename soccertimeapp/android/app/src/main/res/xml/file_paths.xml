@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- For saving to Downloads folder -->
+    <external-path name="external_files" path="." />
+    <external-path name="downloads" path="Download" />
+    <external-path name="downloads_alt" path="Downloads" />
+    
+    <!-- For sharing from app's data directory -->
+    <external-files-path name="external_files" path="." />
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+</paths> 

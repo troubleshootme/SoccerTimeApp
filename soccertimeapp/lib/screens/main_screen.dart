@@ -74,6 +74,39 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver, Si
           print('App resumed: Setting match time to ${_matchTime ~/ 2} seconds (${_formatTime(_matchTime ~/ 2)})');
         });
         
+        // If a period ended while in background, we need to show a notification to the user
+        if (_isPaused && appState.session.activeBeforePause.isNotEmpty) {
+          // Show a snackbar notification about the period ending while in background
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Period ended while app was in background. Tap Resume to continue.'),
+                  duration: Duration(seconds: 5),
+                  action: SnackBarAction(
+                    label: 'Resume',
+                    onPressed: () {
+                      _safeSetState(() {
+                        _isPaused = false;
+                        appState.session.isPaused = false;
+                        
+                        // Reactivate players that were active before pause
+                        for (var playerName in appState.session.activeBeforePause) {
+                          if (appState.session.players.containsKey(playerName)) {
+                            appState.togglePlayer(playerName);
+                          }
+                        }
+                        // Clear the list after reactivating
+                        appState.session.activeBeforePause = [];
+                      });
+                    },
+                  ),
+                ),
+              );
+            }
+          });
+        }
+        
         // Add a slight delay to ensure player times are loaded correctly
         Future.delayed(Duration(milliseconds: 500), () {
           if (mounted) {
@@ -86,7 +119,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver, Si
         });
       }
     } else if (state == AppLifecycleState.paused) {
-      // App went to background - save state
+      // App went to background - save state but don't pause timers
       if (mounted && _isInitialized) {
         final appState = Provider.of<AppState>(context, listen: false);
         
@@ -508,8 +541,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver, Si
       // Play whistle sound
       _playWhistle(isMatchEnd: appState.session.currentPeriod >= appState.session.matchSegments);
       
-      // Show period end dialog after a short delay to ensure UI updates first
-      if (mounted) {
+      // Save the session state to persist period end
+      appState.saveSession();
+      
+      // Check if app is in foreground or background
+      final lifecycleState = WidgetsBinding.instance.lifecycleState;
+      final isBackground = lifecycleState == AppLifecycleState.paused || 
+                          lifecycleState == AppLifecycleState.inactive;
+      
+      if (isBackground) {
+        // If in background, automatically advance the period
+        // This ensures the correct period is shown when app is brought back to foreground
+        appState.session.currentPeriod++;
+        appState.session.hasWhistlePlayed = false;
+        appState.saveSession();
+        
+        // When the app comes back to foreground, it will still be paused
+        // but showing the correct period
+      } else if (mounted) {
+        // Only show dialog if the app is in foreground
         Future.delayed(Duration(milliseconds: 100), () {
           if (mounted) {
             showDialog(
@@ -1524,7 +1574,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver, Si
                                 );
                               },
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isDark ? AppThemes.darkResetButton : AppThemes.lightResetButton,
+                                backgroundColor: isDark ? AppThemes.darkExitButton : Colors.red,
                                 padding: EdgeInsets.symmetric(vertical: 12),
                                 foregroundColor: Colors.white,
                                 textStyle: TextStyle(
@@ -1584,7 +1634,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver, Si
                                 );
                               },
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isDark ? AppThemes.darkExitButton : AppThemes.lightExitButton,
+                                backgroundColor: Colors.red.shade700,
                                 padding: EdgeInsets.symmetric(vertical: 12),
                                 foregroundColor: Colors.white,
                                 textStyle: TextStyle(

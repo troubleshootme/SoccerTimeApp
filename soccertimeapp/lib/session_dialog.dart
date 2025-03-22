@@ -559,6 +559,7 @@ class _SessionDialogState extends State<SessionDialog> {
         _isLoading = true;
       });
       
+      print('Starting backup process...');
       final filePath = await BackupManager().backupSessions(context);
       
       setState(() {
@@ -566,15 +567,45 @@ class _SessionDialogState extends State<SessionDialog> {
       });
       
       if (filePath != null) {
+        print('Backup successful to: $filePath');
         BackupManager().showBackupSuccess(context, filePath);
+      } else {
+        print('Backup returned null path');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Backup failed - could not create backup file')),
+        );
       }
     } catch (e) {
+      print('Error during backup: $e');
       setState(() {
         _isLoading = false;
       });
-      print('Error during backup: $e');
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error during backup: $e')),
+        SnackBar(
+          content: Text('Error during backup: $e'),
+          duration: Duration(seconds: 7),
+          action: SnackBarAction(
+            label: 'Details',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Backup Error Details'),
+                  content: SingleChildScrollView(
+                    child: Text('$e\n\nMake sure you have granted storage permissions to the app.'),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       );
     }
   }
@@ -586,27 +617,55 @@ class _SessionDialogState extends State<SessionDialog> {
         _isLoading = true;
       });
       
+      print('Starting restore process...');
       final success = await BackupManager().restoreSessions(context);
       
       if (success) {
+        print('Restore successful');
         // Reload sessions list after restore
         await _loadSessions();
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Sessions restored successfully')),
         );
+      } else {
+        print('Restore unsuccessful');
       }
       
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
+      print('Error during restore: $e');
       setState(() {
         _isLoading = false;
       });
-      print('Error during restore: $e');
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error during restore: $e')),
+        SnackBar(
+          content: Text('Error during restore: $e'),
+          duration: Duration(seconds: 7),
+          action: SnackBarAction(
+            label: 'Details',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Restore Error Details'),
+                  content: SingleChildScrollView(
+                    child: Text('$e\n\nMake sure you have granted storage permissions to the app and have valid backup files available.'),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       );
     }
   }
