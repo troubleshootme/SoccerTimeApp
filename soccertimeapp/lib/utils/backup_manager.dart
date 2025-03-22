@@ -95,104 +95,34 @@ class BackupManager {
       // Generate a unique filename with timestamp
       final backupFileName = _getBackupFileName();
       
-      // Create a multi-backup strategy where we save to multiple locations
-      // to ensure at least one copy is accessible after reinstallation
-      List<String> successPaths = [];
-      List<String> primaryPaths = []; // Paths to try first
-      List<String> secondaryPaths = []; // Fallback paths
-      Exception? lastError;
-      
-      // STRATEGY 1: Public Downloads folders - most user-accessible
-      primaryPaths.addAll([
+      // Primary locations to try saving the backup
+      final primaryPaths = [
         '/storage/emulated/0/Download',
         '/sdcard/Download',
         '/storage/emulated/0/Downloads',
         '/sdcard/Downloads',
-      ]);
+      ];
       
-      // STRATEGY 2: Try DCIM folder which is typically excluded from app uninstall cleanup
-      primaryPaths.addAll([
-        '/storage/emulated/0/DCIM/SoccerTimeBackups',
-        '/sdcard/DCIM/SoccerTimeBackups',
-      ]);
-      
-      // Try to create DCIM backup directory if it doesn't exist
-      for (int i = 4; i < primaryPaths.length; i++) {
-        try {
-          await Directory(primaryPaths[i]).create(recursive: true);
-          print('Created backup directory: ${primaryPaths[i]}');
-        } catch (e) {
-          print('Failed to create directory ${primaryPaths[i]}: $e');
-        }
-      }
-      
-      // STRATEGY 3: Application specific directories - less accessible but more reliable
-      try {
-        // App's documents directory - will be removed on uninstall
-        final documentsDir = await getApplicationDocumentsDirectory();
-        if (documentsDir != null) {
-          secondaryPaths.add(documentsDir.path);
-        }
-        
-        // External storage directories - may be preserved after uninstall
-        if (Platform.isAndroid) {
-          final externalStoragePaths = await getExternalStorageDirectories();
-          if (externalStoragePaths != null && externalStoragePaths.isNotEmpty) {
-            secondaryPaths.addAll(externalStoragePaths.map((dir) => dir.path));
-          }
-        }
-        
-        // Cache directory - just in case, but will likely be cleared
-        final tempDir = await getTemporaryDirectory();
-        secondaryPaths.add(tempDir.path);
-        
-      } catch (e) {
-        print('Error getting app-specific directories: $e');
-      }
-      
-      // STRATEGY 4: External storage directory (main)
-      try {
-        final externalDir = await getExternalStorageDirectory();
-        if (externalDir != null) {
-          secondaryPaths.add(externalDir.path);
-        }
-      } catch (e) {
-        print('Error getting external storage directory: $e');
-      }
-      
-      // First try primary paths
+      // Try each path until one works
+      String? filePath;
+      Exception? lastError;
       bool backupSaved = false;
-      String? primaryFilePath;
       
       for (final path in primaryPaths) {
-        if (backupSaved) continue;
+        // Stop if we already saved the file
+        if (backupSaved) break;
         
         try {
           final downloadDir = Directory(path);
-          final dirExists = await downloadDir.exists();
-          if (!dirExists) {
-            // Try to create directory if it doesn't exist
-            try {
-              await downloadDir.create(recursive: true);
-              print('Created directory: $path');
-            } catch (e) {
-              print('Failed to create directory $path: $e');
-              continue;
-            }
-          }
-          
-          print('Trying to save to: $path');
-          final backupFile = File('$path/$backupFileName');
-          
-          await backupFile.writeAsString(jsonData);
-          successPaths.add(backupFile.path);
-          
-          if (primaryFilePath == null) {
-            primaryFilePath = backupFile.path;
+          if (await downloadDir.exists()) {
+            print('Trying to save backup to: $path');
+            final backupFile = File('$path/$backupFileName');
+            
+            await backupFile.writeAsString(jsonData);
+            filePath = backupFile.path;
+            print('Backup saved to: $filePath');
             backupSaved = true;
-            print('Primary backup saved to: $primaryFilePath');
-          } else {
-            print('Additional backup saved to: ${backupFile.path}');
+            break; // Exit loop after successful save
           }
         } catch (e) {
           print('Failed to save to $path: $e');
@@ -200,52 +130,41 @@ class BackupManager {
         }
       }
       
-      // Then try secondary paths for redundancy, but don't set backupSaved flag
-      for (final path in secondaryPaths) {
+      // If we couldn't save to any of the primary paths, try one more fallback location
+      if (!backupSaved) {
         try {
-          final dirPath = Directory(path);
-          if (await dirPath.exists()) {
-            print('Trying to save backup copy to: $path');
-            final backupFile = File('$path/$backupFileName');
+          final documentsDir = await getApplicationDocumentsDirectory();
+          if (documentsDir != null) {
+            print('Trying to save to documents directory: ${documentsDir.path}');
+            final backupFile = File('${documentsDir.path}/$backupFileName');
             
             await backupFile.writeAsString(jsonData);
-            successPaths.add(backupFile.path);
-            print('Backup copy saved to: ${backupFile.path}');
+            filePath = backupFile.path;
+            print('Backup saved to documents directory: $filePath');
+            backupSaved = true;
           }
         } catch (e) {
-          print('Failed to save backup copy to $path: $e');
+          print('Failed to save to documents directory: $e');
         }
       }
       
-      // If at least one backup was saved successfully
-      if (successPaths.isNotEmpty) {
-        final filePath = primaryFilePath ?? successPaths.first;
-        
-        // Show success message with the file path
-        _showBackupSuccess(context, filePath);
-        
-        // Show a more detailed message if we saved to multiple locations
-        if (successPaths.length > 1) {
-          print('Successfully created ${successPaths.length} backup copies');
-        }
-        
-        return filePath;
-      } else {
-        throw lastError ?? Exception('Could not access any storage locations for backup');
+      // Check if we successfully saved the backup
+      if (!backupSaved) {
+        // If no file was saved, throw an error
+        throw lastError ?? Exception('Could not save backup file to any location');
       }
+      
+      _showBackupSuccess(context, filePath!);
+      return filePath;
     } catch (e) {
       print('Error creating backup: $e');
-      
-      // Fallback to sharing method if direct save fails
-      try {
-        return await _fallbackToShareBackup(context);
-      } catch (e2) {
-        print('Even fallback method failed: $e2');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error creating backup: $e')),
-        );
-        return null;
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error creating backup: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return null;
     }
   }
   
@@ -520,18 +439,38 @@ class BackupManager {
       
       // Delete other backups if requested
       if (deleteOtherBackups) {
+        final backups = await _findBackupFiles();
         int deletedCount = 0;
-        for (final backup in availableBackups) {
-          if (backup.path != selectedBackup.path) {
-            try {
-              await backup.delete();
-              deletedCount++;
-            } catch (e) {
-              print('Error deleting backup: ${backup.path}: $e');
+        
+        // Get information about the selected backup file
+        final selectedStat = await selectedBackup.stat();
+        final selectedIdentifier = '${selectedStat.size}_${selectedStat.modified.millisecondsSinceEpoch}_${selectedStat.mode}';
+        
+        // Don't delete the backup we just restored from or its symlinks
+        for (var backup in backups) {
+          try {
+            // Check if it's the same physical file as our selected backup
+            final backupStat = await backup.stat();
+            final backupIdentifier = '${backupStat.size}_${backupStat.modified.millisecondsSinceEpoch}_${backupStat.mode}';
+            
+            if (backup.path != selectedBackup.path) {
+              // If it's not the same path AND it's not the same physical file, delete it
+              if (backupIdentifier != selectedIdentifier) {
+                await backup.delete();
+                print('Deleted backup: ${backup.path}');
+                deletedCount++;
+              } else {
+                print('Skipping deletion of backup at ${backup.path} as it\'s a symlink to the selected backup');
+              }
+            } else {
+              print('Preserving the restored backup: ${backup.path}');
             }
+          } catch (e) {
+            print('Error checking or deleting backup ${backup.path}: $e');
           }
         }
-        print('Deleted $deletedCount other backup files');
+        
+        print('Deleted $deletedCount backup files, kept restored backup and its symlinks.');
       }
       
       // Show success message
@@ -555,6 +494,8 @@ class BackupManager {
   /// Find all backup files in potential download folders
   Future<List<File>> _findBackupFiles() async {
     List<File> backups = [];
+    Set<String> uniqueFilePaths = {}; // Track unique paths
+    Set<String> uniqueFileIdentifiers = {}; // Track unique files by stat info
     
     // Try multiple paths for Downloads folder with more comprehensive options
     final paths = [
@@ -563,124 +504,72 @@ class BackupManager {
       '/storage/emulated/0/Downloads',   // Another common path
       '/sdcard/Downloads',               // Alternative path
       '/storage/self/primary/Download',  // Another Android path variant
-      '/storage/emulated/0/Android/data/com.example.soccertimeapp/files', // App-specific external storage
+      '/storage/emulated/0/DCIM',        // DCIM folder
+      '/sdcard/DCIM',                    // Alternative DCIM path
     ];
     
-    // Add path for user-facing folders on Android 10+
-    if (Platform.isAndroid) {
-      try {
-        final externalStoragePaths = await getExternalStorageDirectories();
-        if (externalStoragePaths != null) {
-          for (var dir in externalStoragePaths) {
-            print('External storage directory: ${dir.path}');
-            paths.add(dir.path);
-          }
-        }
-      } catch (e) {
-        print('Error getting external storage directories: $e');
-      }
-    }
-    
-    // Also try to get the external storage directory
+    // Try shared storage paths for Android 10+
     try {
-      final externalDir = await getExternalStorageDirectory();
-      if (externalDir != null) {
-        print('External storage directory for finding backups: ${externalDir.path}');
-        paths.add(externalDir.path);
-        
-        // Navigate up to find Download folder
-        var current = externalDir;
-        var pathParts = current.path.split('/');
-        
-        // Try to find the Download folder by navigating up the directory tree
-        for (int i = pathParts.length; i >= 3; i--) {
-          var basePath = pathParts.sublist(0, i).join('/');
-          for (var downloadName in ['Download', 'Downloads']) {
-            var downloadPath = '$basePath/$downloadName';
-            var downloadDir = Directory(downloadPath);
-            if (await downloadDir.exists()) {
-              print('Found Download folder at: $downloadPath');
-              paths.add(downloadPath);
-            }
-          }
+      if (Platform.isAndroid) {
+        // Try to get all available external storage directories
+        final externalStorageDirs = await getExternalStorageDirectories();
+        if (externalStorageDirs != null) {
+          paths.addAll(externalStorageDirs.map((dir) => dir.path));
         }
       }
     } catch (e) {
-      print('Error finding external directory for backups: $e');
+      print('Error getting external storage directories: $e');
     }
     
-    // Add Documents directory as another option
+    // Also try to get the app's documents directory
     try {
       final documentsDir = await getApplicationDocumentsDirectory();
       if (documentsDir != null) {
-        print('Documents directory for finding backups: ${documentsDir.path}');
         paths.add(documentsDir.path);
       }
     } catch (e) {
-      print('Error finding documents directory: $e');
+      print('Error getting documents directory: $e');
     }
     
-    // Add temporary directory as a fallback
+    // Check root paths
     try {
-      final tempDir = await getTemporaryDirectory();
-      print('Temporary directory for finding backups: ${tempDir.path}');
-      paths.add(tempDir.path);
-    } catch (e) {
-      print('Error finding temporary directory: $e');
-    }
-    
-    // For root paths and DCIM folder
-    try {
-      final dcimPaths = [
+      final rootPaths = [
         '/storage/emulated/0',
         '/sdcard',
-        '/storage/emulated/0/DCIM',
-        '/sdcard/DCIM',
       ];
-      paths.addAll(dcimPaths);
+      paths.addAll(rootPaths);
     } catch (e) {
-      print('Error adding DCIM paths: $e');
+      print('Error adding root paths: $e');
     }
     
-    // Recursive search for backup files
-    Future<void> searchDirectoryRecursively(String path, int depth) async {
-      if (depth > 3) return; // Limit recursion depth to avoid excessive searching
-      
+    // Helper to check if file is a duplicate or symlink
+    Future<bool> isUniqueFile(File file) async {
       try {
-        final dir = Directory(path);
-        if (await dir.exists()) {
-          final entities = await dir.list().toList();
-          
-          // Search for backup files in current directory
-          for (final entity in entities) {
-            if (entity is File && 
-                entity.path.contains(backupFileNameBase) && 
-                entity.path.endsWith(backupFileExt)) {
-              print('Found backup file: ${entity.path}');
-              if (!backups.any((file) => file.path == entity.path)) {
-                backups.add(entity);
-              }
-            }
-          }
-          
-          // Recursively search subdirectories
-          if (depth < 2) { // Only go deeper for top-level directories
-            for (final entity in entities) {
-              if (entity is Directory) {
-                // Skip certain system directories to speed up search
-                if (!entity.path.contains('/Android/data') &&
-                    !entity.path.contains('/Android/obb') &&
-                    !entity.path.contains('/Android/media') &&
-                    !entity.path.contains('.thumbnails') &&
-                    !entity.path.contains('.cache')) {
-                  await searchDirectoryRecursively(entity.path, depth + 1);
-                }
-              }
-            }
-          }
+        // Skip if we've already seen this exact path
+        if (uniqueFilePaths.contains(file.path)) {
+          print('Skipping duplicate path: ${file.path}');
+          return false;
         }
+        uniqueFilePaths.add(file.path);
+        
+        // Get file stats to identify unique files
+        final stat = await file.stat();
+        
+        // Create a unique identifier using size, modified time and mode
+        // This helps detect when two paths point to the same physical file
+        final fileIdentifier = '${stat.size}_${stat.modified.millisecondsSinceEpoch}_${stat.mode}';
+        
+        if (uniqueFileIdentifiers.contains(fileIdentifier)) {
+          print('Detected symlink or hard link: ${file.path}');
+          return false;
+        }
+        
+        uniqueFileIdentifiers.add(fileIdentifier);
+        return true;
       } catch (e) {
-        print('Error searching directory $path: $e');
+        print('Error checking file uniqueness: $e');
+        // If we can't check, treat as unique to be safe
+        return true;
       }
     }
     
@@ -688,28 +577,23 @@ class BackupManager {
     for (final path in paths) {
       try {
         print('Searching for backups in: $path');
-        final downloadDir = Directory(path);
-        if (await downloadDir.exists()) {
+        final dir = Directory(path);
+        if (await dir.exists()) {
           // List all files in directory
-          final entities = await downloadDir.list().toList();
-          print('Found ${entities.length} files/directories in $path');
+          final entities = await dir.list().toList();
           
           // Filter for backup files
           for (final entity in entities) {
             if (entity is File && 
                 entity.path.contains(backupFileNameBase) && 
                 entity.path.endsWith(backupFileExt)) {
-              print('Found backup file: ${entity.path}');
-              if (!backups.any((file) => file.path == entity.path)) {
+              
+              // Only add the file if it's not a duplicate or symlink
+              if (await isUniqueFile(entity)) {
+                print('Found unique backup file: ${entity.path}');
                 backups.add(entity);
               }
             }
-          }
-          
-          // For specific directories, try a limited recursive search
-          if (path.contains('Download') || path.contains('Downloads') || 
-              path.contains('Documents') || path.contains('DCIM')) {
-            await searchDirectoryRecursively(path, 0);
           }
         }
       } catch (e) {
@@ -717,24 +601,118 @@ class BackupManager {
       }
     }
     
-    // If still no backups found and we're on Android, try content resolver approach
-    if (backups.isEmpty && Platform.isAndroid) {
-      try {
-        print('Trying alternative approach to find backups');
-        final tempDir = await getTemporaryDirectory();
-        final tempFile = File('${tempDir.path}/backup_finder.txt');
-        await tempFile.writeAsString('Searching for backups');
-      } catch (e) {
-        print('Error in alternative approach: $e');
+    // If no backups found, try a deeper search in the Downloads/DCIM folders
+    if (backups.isEmpty) {
+      final deepSearchPaths = paths.where((path) => 
+          path.contains('Download') || 
+          path.contains('DCIM') || 
+          path.endsWith('/0') || 
+          path.endsWith('sdcard')).toList();
+      
+      for (final path in deepSearchPaths) {
+        try {
+          print('Deep searching in: $path');
+          final dir = Directory(path);
+          if (await dir.exists()) {
+            await _searchDirectoryForBackups(dir, backups, uniqueFilePaths, uniqueFileIdentifiers, 0, 2);
+          }
+        } catch (e) {
+          print('Error deep searching in $path: $e');
+        }
       }
     }
     
-    print('Total backup files found: ${backups.length}');
+    print('Total unique backup files found: ${backups.length}');
     for (final backup in backups) {
       print('  ${backup.path}');
     }
     
     return backups;
+  }
+  
+  // Helper to recursively search directories for backup files
+  Future<void> _searchDirectoryForBackups(
+    Directory dir, 
+    List<File> backups, 
+    Set<String> uniqueFilePaths,
+    Set<String> uniqueFileIdentifiers,
+    int currentDepth, 
+    int maxDepth
+  ) async {
+    if (currentDepth > maxDepth) return;
+    
+    try {
+      final entities = await dir.list().toList();
+      
+      // Helper to check if file is a duplicate or symlink
+      Future<bool> isUniqueFile(File file) async {
+        try {
+          // Skip if we've already seen this exact path
+          if (uniqueFilePaths.contains(file.path)) {
+            print('Skipping duplicate path: ${file.path}');
+            return false;
+          }
+          uniqueFilePaths.add(file.path);
+          
+          // Get file stats to identify unique files
+          final stat = await file.stat();
+          
+          // Create a unique identifier using size, modified time and mode
+          // This helps detect when two paths point to the same physical file
+          final fileIdentifier = '${stat.size}_${stat.modified.millisecondsSinceEpoch}_${stat.mode}';
+          
+          if (uniqueFileIdentifiers.contains(fileIdentifier)) {
+            print('Detected symlink or hard link: ${file.path}');
+            return false;
+          }
+          
+          uniqueFileIdentifiers.add(fileIdentifier);
+          return true;
+        } catch (e) {
+          print('Error checking file uniqueness: $e');
+          // If we can't check, treat as unique to be safe
+          return true;
+        }
+      }
+      
+      // Check files in this directory
+      for (final entity in entities) {
+        if (entity is File && 
+            entity.path.contains(backupFileNameBase) && 
+            entity.path.endsWith(backupFileExt)) {
+          
+          // Only add the file if it's not a duplicate or symlink
+          if (await isUniqueFile(entity)) {
+            print('Found unique backup file in deep search: ${entity.path}');
+            backups.add(entity);
+          }
+        }
+      }
+      
+      // Recursively check subdirectories
+      if (currentDepth < maxDepth) {
+        for (final entity in entities) {
+          if (entity is Directory) {
+            // Skip system directories
+            if (!entity.path.contains('.thumbnails') && 
+                !entity.path.contains('.cache') &&
+                !entity.path.contains('/Android/data') &&
+                !entity.path.contains('/Android/obb')) {
+              await _searchDirectoryForBackups(
+                entity, 
+                backups, 
+                uniqueFilePaths,
+                uniqueFileIdentifiers,
+                currentDepth + 1, 
+                maxDepth
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Error searching directory ${dir.path}: $e');
+    }
   }
   
   /// Shows a confirmation dialog before restoring
@@ -825,5 +803,129 @@ class BackupManager {
   /// Public method to show backup success message
   void showBackupSuccess(BuildContext context, String filePath) {
     _showBackupSuccess(context, filePath);
+  }
+
+  /// Restore sessions from a backup file
+  Future<String> restoreFromBackup(File backupFile, {bool deleteOtherBackups = false}) async {
+    try {
+      print('Restoring from backup file: ${backupFile.path}');
+      final String jsonContent = await backupFile.readAsString();
+      final Map<String, dynamic> backupData = json.decode(jsonContent);
+      
+      // Initialize the database
+      final db = HiveSessionDatabase.instance;
+      await db.init();
+      
+      // Clear existing data
+      await db.clearAllSessions();
+      
+      // Restore sessions, players and settings
+      int sessionCount = 0;
+      
+      // Backup format depends on the version, handle different formats
+      if (backupData.containsKey('sessions')) {
+        // Format: {sessions: [...], players: [...], settings: [...]}
+        final sessions = backupData['sessions'] as List;
+        final players = backupData['players'] as List;
+        final settings = backupData['settings'] as List;
+        
+        // First create all sessions
+        for (final sessionData in sessions) {
+          final sessionId = sessionData['id'];
+          final sessionName = sessionData['name'] ?? 'Restored Session';
+          await db.updateSession({
+            'id': sessionId,
+            'name': sessionName,
+            'created_at': sessionData['created_at'] ?? DateTime.now().millisecondsSinceEpoch,
+          });
+          sessionCount++;
+        }
+        
+        // Then restore players
+        for (final playerData in players) {
+          final sessionId = playerData['session_id'];
+          final playerName = playerData['name'] ?? 'Player';
+          final timerSeconds = playerData['timer_seconds'] ?? 0;
+          await db.insertPlayer(sessionId, playerName, timerSeconds);
+        }
+        
+        // Finally restore settings
+        for (final settingData in settings) {
+          final sessionId = settingData['session_id'];
+          await db.saveSessionSettings(sessionId, settingData);
+        }
+      } else {
+        // Array format: [{session: {...}, players: [...], settings: [...]}]
+        final backupItems = backupData['backupData'] ?? backupData as List;
+        
+        for (final item in backupItems) {
+          // Process each session with its players and settings
+          final sessionData = item['session'];
+          final sessionId = sessionData['id'];
+          final sessionName = sessionData['name'] ?? 'Restored Session';
+          
+          // Create session
+          await db.updateSession({
+            'id': sessionId,
+            'name': sessionName,
+            'created_at': sessionData['created_at'] ?? DateTime.now().millisecondsSinceEpoch,
+          });
+          sessionCount++;
+          
+          // Add players
+          for (final playerData in item['players']) {
+            final playerName = playerData['name'] ?? 'Player';
+            final timerSeconds = playerData['timer_seconds'] ?? 0;
+            await db.insertPlayer(sessionId, playerName, timerSeconds);
+          }
+          
+          // Add settings
+          if (item['settings'] != null) {
+            await db.saveSessionSettings(sessionId, item['settings']);
+          }
+        }
+      }
+
+      // Delete other backups if requested
+      if (deleteOtherBackups) {
+        final backups = await _findBackupFiles();
+        int deletedCount = 0;
+        
+        // Get information about the selected backup file
+        final selectedStat = await backupFile.stat();
+        final selectedIdentifier = '${selectedStat.size}_${selectedStat.modified.millisecondsSinceEpoch}_${selectedStat.mode}';
+        
+        // Don't delete the backup we just restored from or its symlinks
+        for (var backup in backups) {
+          try {
+            // Check if it's the same physical file as our selected backup
+            final backupStat = await backup.stat();
+            final backupIdentifier = '${backupStat.size}_${backupStat.modified.millisecondsSinceEpoch}_${backupStat.mode}';
+            
+            if (backup.path != backupFile.path) {
+              // If it's not the same path AND it's not the same physical file, delete it
+              if (backupIdentifier != selectedIdentifier) {
+                await backup.delete();
+                print('Deleted backup: ${backup.path}');
+                deletedCount++;
+              } else {
+                print('Skipping deletion of backup at ${backup.path} as it\'s a symlink to the selected backup');
+              }
+            } else {
+              print('Preserving the restored backup: ${backup.path}');
+            }
+          } catch (e) {
+            print('Error checking or deleting backup ${backup.path}: $e');
+          }
+        }
+        
+        print('Deleted $deletedCount backup files, kept restored backup and its symlinks.');
+      }
+
+      return 'Restoration successful! $sessionCount sessions restored.';
+    } catch (e) {
+      print('Error restoring from backup: $e');
+      return 'Error: $e';
+    }
   }
 } 

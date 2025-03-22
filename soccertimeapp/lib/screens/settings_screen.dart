@@ -357,7 +357,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isDark ? Colors.deepPurple : Colors.deepPurple.shade400,
+                          backgroundColor: isDark ? const Color.fromARGB(255, 0, 158, 179) : const Color.fromARGB(255, 0, 100, 100),
                           foregroundColor: Colors.white,
                           padding: EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
